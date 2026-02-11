@@ -1,0 +1,5 @@
+# Obsidian
+.obsidian/
+
+# Claude Code private files
+.claude/

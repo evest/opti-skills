@@ -1,0 +1,91 @@
+# Optimizely Frontend Hosting - .zipignore Template
+# 
+# This file specifies which files and directories should be EXCLUDED from the deployment package
+# Similar to .gitignore, but for deployment packages
+# 
+# Usage: Copy this file to your Next.js project root as ".zipignore"
+
+# Build outputs (regenerated during deployment)
+.next
+out
+
+# Dependencies (reinstalled during deployment via package.json)
+node_modules
+
+# Environment files (should be configured in PaaS Portal instead)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage
+.nyc_output
+__tests__/__snapshots__
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Temporary files
+.tmp
+tmp
+temp
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Optional: Documentation (if you don't want it in production)
+# README.md
+# CONTRIBUTING.md
+# docs/
+
+# Optional: Development tools
+# .eslintrc
+# .prettierrc
+# jest.config.js
+# cypress/
+
+# Optional: CI/CD files (usually not needed in deployment)
+# .github
+# .gitlab-ci.yml
+# azure-pipelines.yml
+# .circleci
+
+# Deployment artifacts (don't include old deployment packages)
+*.zip
+*.tar.gz
+
+# Lock files - KEEP THESE (commented out by default)
+# These should be INCLUDED in your package
+# package-lock.json  # DO NOT IGNORE - needed for npm
+# yarn.lock          # DO NOT IGNORE - needed for yarn
+# pnpm-lock.yaml     # DO NOT IGNORE - needed for pnpm
+
+# Misc
+README.md
+deploy.ps1
+certificates
