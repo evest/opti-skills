@@ -94,7 +94,17 @@ ctaLink: {
 
 **Use for:** Navigation links, CTAs, links that need text/title/target metadata
 
-**KEY DIFFERENCE:** Use `url` for simple URL storage, use `link` when you need text, title, and target attributes along with the URL.
+**Link runtime shape** (what you receive in the component):
+```typescript
+{
+  url: InferredUrl;    // URL as InferredUrl object — use url.default for href
+  text: string | null; // Link display text
+  title: string | null; // Tooltip / title attribute
+  target: string | null; // e.g. '_blank'
+}
+```
+
+**KEY DIFFERENCE:** Use `url` for simple URL storage (returns InferredUrl), use `link` when you need text, title, and target attributes along with the URL.
 
 ## Boolean Property
 
@@ -183,7 +193,7 @@ eventStartTime: {
 
 Lists of values. **IMPORTANT: Cannot contain nested arrays.**
 
-**⚠️ IMPORTANT RESTRICTION**: Content types with `elementEnabled` **CANNOT** have array properties that contain content items (`type: "array"` with `items: { type: "content" }`). Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have array properties that contain content items (`type: "array"` with `items: { type: "content" }`). Elements are meant to be simple, atomic components, not containers.
 
 If your component needs to contain arrays of other content (like AccordionBlock with AccordionItems), use **only** `compositionBehaviors: ['sectionEnabled']`.
 
@@ -280,7 +290,7 @@ heroSection: {
 
 **Important restriction: It is not allowed to have an inline property of type content on an element **
 
-**⚠️ IMPORTANT RESTRICTION**: Content types with `elementEnabled` **CANNOT** have properties that are content items (`type: "content"`). Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have properties that are content items (`type: "content"`). Elements are meant to be simple, atomic components, not containers.
 
 Use `ContentReference` instead to reference a shared block or page.
 
@@ -332,7 +342,7 @@ metadata: {
 
 **Use for:** Structured metadata, configuration data, flexible data storage
 
-**⚠️ IMPORTANT RESTRICTION**: Content types with `elementEnabled` **CANNOT** have properties that are of  type `json`. Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have properties that are of  type `json`. Elements are meant to be simple, atomic components, not containers.
 
 
 ## Indexing Types

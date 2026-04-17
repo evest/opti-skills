@@ -2,6 +2,21 @@
 
 Common issues and solutions when working with Optimizely CMS content types and React components.
 
+## Table of Contents
+
+- [CMS Sync Errors](#cms-sync-errors) — Config push failures, unsupported base types, _element restrictions
+- [TypeScript Build Errors](#typescript-build-errors) — Module imports, property type casing, missing properties
+- [Display Template Errors](#display-template-errors) — Template type issues, RichText props, light/dark mode
+- [Property Type Issues](#property-type-issues) — Numeric types, default values, arrays of content
+- [Type Handling in Components](#type-handling-in-components) — InferredUrl, booleans, JSON arrays, content arrays
+- [Component Patterns](#component-patterns) — Container + Item pattern, common type patterns
+- [Property Type Cheat Sheet](#property-type-cheat-sheet) — Quick reference for when to use each type
+- [Visual Builder Preview Errors](#visual-builder-preview-errors) — Registry errors, 404s, blank previews, scroll issues
+- [After Making Changes](#after-making-changes) — Rebuild/restart checklist
+- [InferredContentReference vs InferredUrl](#inferredcontentreference-vs-inferredurl)
+
+---
+
 ## CMS Sync Errors
 
 ### "Cannot read properties of undefined (reading 'map')"
@@ -48,85 +63,32 @@ export default buildConfig({
 
 ---
 
-### "The base type '_element' is not supported"
+### "The property 'X' is not allowed on element content types"
 
-**Error**: When pushing config to CMS, you get an error: `The base type '_element' is not supported.`
+**Error**: When pushing config to CMS, you get an error about certain property types not being allowed on element types.
 
-**Cause**: There is no `_element` base type in Optimizely CMS. Elements are actually `_component` types with the `elementEnabled` composition behavior.
+**Cause**: Optimizely CMS restricts `_element` content types from having certain complex property types. Elements are meant to be simple, atomic components, not containers.
 
-**❌ Wrong:**
-```typescript
-export const TextElementCT = contentType({
-  key: 'TextElement',
-  displayName: 'Text Element',
-  baseType: '_element',  // ❌ This base type does not exist!
-  properties: {
-    text: { type: 'string', displayName: 'Text' },
-  },
-});
-```
-
-**✅ Correct:**
-```typescript
-export const TextElementCT = contentType({
-  key: 'TextElement',
-  displayName: 'Text Element',
-  baseType: '_component',  // ✅ Use _component
-  compositionBehaviors: ['elementEnabled'],  // ✅ Add elementEnabled behavior
-  properties: {
-    text: { type: 'string', displayName: 'Text' },
-  },
-});
-```
-
-**Key points:**
-- Elements use `baseType: '_component'`
-- Add `compositionBehaviors: ['elementEnabled']` to make it an element
-- You can also add `'sectionEnabled'` if you want the component to work as both
-
----
-
-### "The property 'X' is not allowed when content type has ElementEnabled"
-
-**Error**: When pushing config to CMS, you get an error about array properties not being allowed with `elementEnabled`.
-
-**Cause**: Optimizely CMS restricts content types with `compositionBehaviors: ["elementEnabled"]` from having certain complex property types. Elements are meant to be simple, atomic components, not containers.
-
-**FORBIDDEN property types with `elementEnabled`:**
+**FORBIDDEN property types on `_element`:**
 1. ❌ Arrays with content: `type: "array"` with `items: { type: "content" }`
 2. ❌ Content properties: `type: "content"`
 3. ❌ Component properties: `type: "component"`
 4. ❌ JSON properties: `type: "json"`
 
-**ALLOWED property types with `elementEnabled`:**
-- ✅ Simple types: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`
+**ALLOWED property types on `_element`:**
+- ✅ Simple types: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`, `link`
 - ✅ Content references: `type: "contentReference"` (for images, media)
 - ✅ Arrays of simple types: `type: "array"` with `items: { type: "string" }` etc.
 
 **Solution options:**
 
-1. **Remove elementEnabled** - If the component needs to contain other content, keep only `sectionEnabled`:
+1. **Use `_component` with `sectionEnabled` instead** - If the component needs complex properties:
    ```typescript
-   compositionBehaviors: ["sectionEnabled"],  // Remove "elementEnabled"
+   baseType: '_component',
+   compositionBehaviors: ['sectionEnabled'],
    ```
 
-2. **Remove the array property** - If you want to keep it as an element, remove array properties with content items
-
-3. **Use JSON instead** - For simple data arrays (not content references), use `type: "json"`:
-   ```typescript
-   // ❌ Not allowed with elementEnabled
-   items: {
-     type: "array",
-     items: { type: "content", allowedTypes: [ItemType] }
-   }
-
-   // ✅ Allowed - simple data
-   items: {
-     type: "json",
-     displayName: "Items",
-     description: "Array of item data"
-   }
-   ```
+2. **Remove the complex property** - If you want to keep it as an element, simplify the data model
 
 **Example:**
 
@@ -134,10 +96,9 @@ export const TextElementCT = contentType({
 // ❌ This will fail when syncing to CMS
 export const AccordionBlockType = contentType({
   key: "AccordionBlock",
-  baseType: "_component",
-  compositionBehaviors: ["elementEnabled", "sectionEnabled"],  // Has elementEnabled
+  baseType: "_element",  // Elements can't have content arrays
   properties: {
-    items: {  // Array of content - NOT ALLOWED!
+    items: {  // Array of content - NOT ALLOWED on _element!
       type: "array",
       items: {
         type: "content",
@@ -147,13 +108,13 @@ export const AccordionBlockType = contentType({
   },
 });
 
-// ✅ Fixed - removed elementEnabled
+// ✅ Fixed - use _component with sectionEnabled for complex blocks
 export const AccordionBlockType = contentType({
   key: "AccordionBlock",
   baseType: "_component",
-  compositionBehaviors: ["sectionEnabled"],  // Only sectionEnabled
+  compositionBehaviors: ["sectionEnabled"],
   properties: {
-    items: {  // Now allowed
+    items: {  // Now allowed on _component
       type: "array",
       items: {
         type: "content",
@@ -162,11 +123,6 @@ export const AccordionBlockType = contentType({
     },
   },
 });
-```
-
-**Quick check**: Search your codebase for files with both `elementEnabled` and array properties:
-```bash
-grep -l "compositionBehaviors.*elementEnabled" src/components/*.tsx | xargs grep -l "items:"
 ```
 
 ## TypeScript Build Errors
@@ -493,7 +449,7 @@ When mapping over content arrays, the items may need explicit type casting:
 ```typescript
 {opti.items.map((item, index) => {
   // Cast to the expected type
-  const accordionItem = item as unknown as Infer<typeof AccordionItemType>;
+  const accordionItem = item as unknown as ContentProps<typeof AccordionItemType>;
 
   return (
     <div key={index}>
@@ -574,7 +530,7 @@ initReactComponentRegistry({
 | URL for iframe src | `opti.embedUrl?.default \|\| ""` |
 | Boolean for HTML attrs | `opti.autoplay === true` |
 | JSON array | `Array.isArray(opti.items) && (opti.items as MyType[]).map(...)` |
-| Content array items | `item as unknown as Infer<typeof ItemType>` |
+| Content array items | `item as unknown as ContentProps<typeof ItemType>` |
 | Numeric types | Use `"integer"` or `"float"`, NOT `"number"` |
 | Default values | Handle in component, NOT in schema |
 | Null checks | `opti.value !== null && opti.value !== undefined` |
@@ -683,15 +639,15 @@ initReactComponentRegistry({
 
 **`components/cms/experiences/BlankExperience.tsx`:**
 ```typescript
-import { BlankExperienceContentType, Infer } from '@optimizely/cms-sdk';
+import { BlankExperienceContentType, ContentProps } from '@optimizely/cms-sdk';
 import {
   ComponentContainerProps,
-  OptimizelyExperience,
+  OptimizelyComposition,
   getPreviewUtils,
 } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: Infer<typeof BlankExperienceContentType>;
+  opti: ContentProps<typeof BlankExperienceContentType>;
 };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
@@ -702,7 +658,7 @@ function ComponentWrapper({ children, node }: ComponentContainerProps) {
 export default function BlankExperience({ opti }: Props) {
   return (
     <main className="blank-experience">
-      <OptimizelyExperience
+      <OptimizelyComposition
         nodes={opti.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
@@ -713,7 +669,7 @@ export default function BlankExperience({ opti }: Props) {
 
 **`components/cms/experiences/BlankSection.tsx`:**
 ```typescript
-import { BlankSectionContentType, Infer } from '@optimizely/cms-sdk';
+import { BlankSectionContentType, ContentProps } from '@optimizely/cms-sdk';
 import {
   OptimizelyGridSection,
   getPreviewUtils,
@@ -721,7 +677,7 @@ import {
 } from '@optimizely/cms-sdk/react/server';
 
 type BlankSectionProps = {
-  opti: Infer<typeof BlankSectionContentType>;
+  opti: ContentProps<typeof BlankSectionContentType>;
 };
 
 export default function BlankSection({ opti }: BlankSectionProps) {
@@ -886,13 +842,23 @@ The SDK has different inferred types for different scenarios:
 ```typescript
 // For contentReference properties (images, media)
 featuredImage: InferredContentReference | null
+// Shape: { url: InferredUrl; item: PublicImageAsset | PublicVideoAsset | PublicRawFileAsset | null }
 
 // For url properties
 websiteUrl: InferredUrl | null
+// Shape: { type, default, hierarchical, internal, graph, base }
 
-// Access the actual URL from InferredUrl
+// For link properties
+ctaLink: { url: InferredUrl; text: string | null; title: string | null; target: string | null } | null
+
+// Access the actual URL string from InferredUrl
 const url = opti.websiteUrl?.default || "";
 
 // Access image URL from contentReference
-const imageUrl = opti.featuredImage?.url;
+const imageUrl = opti.featuredImage?.url?.default || "";
+// Or access the DAM asset directly
+const damUrl = opti.featuredImage?.item?.Url || "";
+
+// Access link href
+const linkHref = opti.ctaLink?.url?.default || "#";
 ```

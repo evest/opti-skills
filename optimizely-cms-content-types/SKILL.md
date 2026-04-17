@@ -1,25 +1,24 @@
 ---
 name: optimizely-cms-content-types
-description: "Generate TypeScript content type definitions for Optimizely SaaS CMS using the Content JS SDK (@optimizely/cms-sdk). Use when the user requests: (1) Creating Optimizely content types, (2) Generating TypeScript files for pages/blocks/elements/experiences, (3) Setting up CMS content models, (4) Creating components like HeroBlock, BannerBlock, CardBlock, (5) Defining page types like HomePage, ArticlePage, BlogPage, (6) Creating elements or sections for Visual Builder, or (7) Making blocks that work as both blocks and elements using compositionBehaviors. Based on official SDK documentation and source code."
+description: "Generate TypeScript content type definitions for Optimizely SaaS CMS using @optimizely/cms-sdk v1.0.0. Use when creating content types, TypeScript files for pages/blocks/elements/experiences, CMS content models, components like HeroBlock or CardBlock, page types like HomePage or ArticlePage, Visual Builder elements/sections, display templates, optimizely.config.mjs setup, CMS CLI sync, GraphClient fetching, damAssets usage, or React component rendering. Also trigger when the user mentions Optimizely SaaS CMS content modeling even without saying 'content types' — e.g. setting up pages, blocks, components, or Visual Builder. Do NOT use for CMS 12/PaaS (.NET types), Commerce catalog types, Graph queries, or frontend hosting (see optimizely-frontend-hosting skill)."
 ---
 
 # Optimizely CMS Content Types
 
-Generate TypeScript content type definitions for Optimizely SaaS CMS using the Content JS SDK.
-
-## Overview
-
-Create properly structured content type definitions for Optimizely SaaS CMS using the `contentType` function from `@optimizely/cms-sdk`.
+Generate TypeScript content type definitions for Optimizely SaaS CMS using the `contentType` function from `@optimizely/cms-sdk` v1.0.0.
 
 **Key capabilities:**
 - **Pages** (`_page`): HomePage, ArticlePage, BlogPage with unique URLs
-- **Components** (`_component`): HeroBlock, BannerBlock, CardBlock - reusable blocks
+- **Components** (`_component`): HeroBlock, BannerBlock, CardBlock — reusable blocks
+- **Elements** (`_element`): Smaller Visual Builder elements (title, button, image)
 - **Sections** (`_section`): Visual Builder sections with layout system
-- **Elements** (`_component` + `elementEnabled`): Smaller Visual Builder elements (use `_component` base type with `compositionBehaviors: ['elementEnabled']`)
 - **Experiences** (`_experience`): Flexible visual page building
-- **Composition**: Make components work as sections/elements with `compositionBehaviors`
+- **Composition**: Make components work as sections with `compositionBehaviors: ['sectionEnabled']`
 - **Media types**: Custom image, video, media types
 - **Folders** (`_folder`): Organize content in asset panel
+- **GraphClient**: Fetch content from Optimizely Graph
+- **damAssets**: DAM asset helpers (srcset, alt text, type guards)
+- **React integration**: Server/client components for rendering
 
 ## Quick Start
 
@@ -28,8 +27,8 @@ Create properly structured content type definitions for Optimizely SaaS CMS usin
 ```typescript
 import { contentType } from '@optimizely/cms-sdk';
 
-export const ArticleContentType = contentType({
-  key: 'Article',
+export const ArticlePageCT = contentType({
+  key: 'ArticlePage',
   baseType: '_page',
   properties: {
     heading: {
@@ -47,14 +46,14 @@ export const ArticleContentType = contentType({
 });
 ```
 
-### Component with Composition Behaviors
+### Component with Section Behavior
 
 ```typescript
 export const HeroBlockCT = contentType({
   key: 'HeroBlock',
   displayName: 'Hero Block',
   baseType: '_component',
-  compositionBehaviors: ['sectionEnabled'],  // Can be used as section
+  compositionBehaviors: ['sectionEnabled'],
   properties: {
     title: { type: 'string', displayName: 'Title' },
     subtitle: { type: 'string', displayName: 'Subtitle' },
@@ -62,260 +61,152 @@ export const HeroBlockCT = contentType({
 });
 ```
 
+### Element (Simple Visual Builder Component)
+
+```typescript
+export const ButtonElementCT = contentType({
+  key: 'ButtonElement',
+  displayName: 'Button Element',
+  baseType: '_element',
+  properties: {
+    text: { type: 'string', displayName: 'Button Text', required: true },
+    link: { type: 'link', displayName: 'Link', required: true },
+  },
+});
+```
+
 ## Built-in Content Metadata
 
-**IMPORTANT**: All content types automatically include built-in metadata properties via `opti._metadata`. **DO NOT create redundant properties** for these fields.
+**IMPORTANT**: All content types automatically include built-in metadata via `opti._metadata`. **DO NOT create redundant properties** for these fields.
 
-### Available Metadata Properties
-
-Every content item has `_metadata` with the following properties:
+Every content item has `_metadata` with these properties:
 
 ```typescript
-opti._metadata.key           // Content unique key (string)
-opti._metadata.locale        // Current locale (string)
-opti._metadata.version       // Version number (string)
-opti._metadata.displayName   // Display name (string)
-opti._metadata.url           // InferredUrl object
-opti._metadata.types         // Array of type names (string[])
-opti._metadata.published     // Published date (string) ✅ Use instead of creating publishDate
-opti._metadata.status        // Content status (string)
-opti._metadata.created       // Created date (string)
-opti._metadata.lastModified  // Last modified date (string)
-opti._metadata.sortOrder     // Sort order (number)
-opti._metadata.variation     // Variation name (string)
+opti._metadata.key               // Content unique key (string)
+opti._metadata.locale             // Current locale (string)
+opti._metadata.fallbackForLocale  // Fallback locale (string)
+opti._metadata.version            // Version number (string)
+opti._metadata.displayName        // Display name (string)
+opti._metadata.url                // InferredUrl object
+opti._metadata.types              // Array of type names (string[])
+opti._metadata.published          // Published date (string) — use instead of creating publishDate
+opti._metadata.status             // Content status (string)
+opti._metadata.created            // Created date (string)
+opti._metadata.lastModified       // Last modified date (string)
+opti._metadata.sortOrder          // Sort order (number)
+opti._metadata.variation          // Content variation (string)
 ```
 
-**Instance-specific metadata** (available on pages/instances):
+**Instance-specific metadata** (pages/instances):
 ```typescript
-opti._metadata.locales       // Available locales (string[])
-opti._metadata.expired       // Expiration date (string | null)
-opti._metadata.container     // Container path (string | null)
-opti._metadata.owner         // Owner identifier (string | null)
-opti._metadata.routeSegment  // URL route segment (string | null)
-opti._metadata.lastModifiedBy // Last modifier (string | null)
-opti._metadata.path          // Content path (string[])
-opti._metadata.createdBy     // Creator identifier (string | null)
+opti._metadata.locales            // Available locales (string[])
+opti._metadata.expired            // Expiration date (string | null)
+opti._metadata.container          // Container path (string | null)
+opti._metadata.owner              // Owner identifier (string | null)
+opti._metadata.routeSegment       // URL route segment (string | null)
+opti._metadata.path               // Content path (string[])
+opti._metadata.lastModifiedBy     // Last modified by (string | null)
+opti._metadata.createdBy          // Created by (string | null)
+opti._metadata.changeset          // Changeset (string | null)
 ```
 
-### Common Mistakes to Avoid
-
-❌ **DON'T create these redundant properties:**
-```typescript
-properties: {
-  publishDate: { type: 'dateTime' },  // ❌ Use opti._metadata.published instead
-  createdDate: { type: 'dateTime' },  // ❌ Use opti._metadata.created instead
-  lastModified: { type: 'dateTime' }, // ❌ Use opti._metadata.lastModified instead
-  title: { type: 'string' },          // ❌ Use opti._metadata.displayName instead (for system title)
-}
-```
-
-✅ **DO use built-in metadata:**
-```typescript
-// In your component
-export default function NewsPage({ opti }: Props) {
-  const publishedDate = opti._metadata.published;
-  const createdDate = opti._metadata.created;
-  const pageTitle = opti._metadata.displayName;
-
-  return (
-    <article>
-      <time dateTime={publishedDate}>{new Date(publishedDate).toLocaleDateString()}</time>
-    </article>
-  );
-}
-```
-
-**When to create custom date properties:**
-- Event start/end dates
-- Custom scheduling fields
-- Business-specific dates that differ from content lifecycle dates
-
-### Other Built-in Properties
-
+Other built-in properties:
 ```typescript
 opti._id              // Unique content ID (string)
 opti.__typename       // Content type name (string)
 opti.__context?.edit  // Preview/edit mode flag (boolean)
 ```
 
-## Property Types
-
-### String
-Simple text fields for titles, names, short text.
-
+❌ **DON'T create these redundant properties:**
 ```typescript
-title: {
-  type: 'string',
-  displayName: 'Title',
-  minLength: 5,
-  maxLength: 100,
-  pattern: '^[A-Za-z0-9 ]+$',
+properties: {
+  publishDate: { type: 'dateTime' },  // Use opti._metadata.published
+  createdDate: { type: 'dateTime' },  // Use opti._metadata.created
+  lastModified: { type: 'dateTime' }, // Use opti._metadata.lastModified
+  title: { type: 'string' },          // Use opti._metadata.displayName (for system title)
 }
 ```
 
-**Enum for content/semantic choices** (NOT for visual styling):
+Custom date properties are appropriate only for business-specific dates (event start/end, campaign dates, deadlines).
+
+## Property Types
+
+For the full property type reference with all options and examples, see `references/property-types.md`.
+
+### Summary
+
+| Type | Use For | Key Options |
+|------|---------|-------------|
+| `string` | Titles, names, short text | `minLength`, `maxLength`, `pattern`, `enum` |
+| `richText` | Formatted content (Slate.js) | `localized` |
+| `url` | Simple web address (InferredUrl at runtime) | — |
+| `link` | Rich link with text, title, target | — |
+| `boolean` | True/false checkboxes | — |
+| `integer` | Whole numbers | `minimum`, `maximum` |
+| `float` | Decimal values | `minimum`, `maximum` |
+| `dateTime` | Date and time values | `minimum`, `maximum` (ISO format) |
+| `array` | Lists of values (no nested arrays) | `items`, `minItems`, `maxItems` |
+| `content` | Reference to content items (flexible) | `allowedTypes`, `restrictedTypes` |
+| `contentReference` | Reference by ID (for media) | `allowedTypes` |
+| `component` | Strongly-typed embedded component | `contentType` (CT reference) |
+| `binary` | File attachments | — |
+| `json` | Arbitrary JSON data | — |
+
+### URL vs Link — Important Distinction
+
+**`url`** stores a web address. At runtime, it resolves to an `InferredUrl` object (not a plain string).
+
+**`link`** stores a rich link object with text, title, and target metadata.
+
+```typescript
+// Simple URL — resolves to InferredUrl at runtime
+websiteUrl: { type: 'url', displayName: 'Website URL' }
+
+// Rich link — resolves to { url: InferredUrl, text, title, target }
+ctaLink: { type: 'link', displayName: 'Call to Action' }
+```
+
+**InferredUrl shape** (used by both `url` and `link`):
+```typescript
+{
+  type: string | null;
+  default: string | null;     // ← Use this for href values
+  hierarchical: string | null;
+  internal: string | null;
+  graph: string | null;
+  base: string | null;
+}
+```
+
+**Link runtime shape** (what you receive in the component):
+```typescript
+{
+  url: InferredUrl;    // URL as InferredUrl object — use url.default for href
+  text: string | null; // Link display text
+  title: string | null; // Tooltip / title attribute
+  target: string | null; // e.g. '_blank'
+}
+```
+
+### String Enums — Content Choices Only
+
+Use `enum` only for semantic/content choices. For visual styling (colors, sizes, variants), use `displayTemplate` instead.
+
 ```typescript
 // ✅ Correct: semantic content choice
 headingLevel: {
   type: 'string',
-  displayName: 'Heading Level',
   enum: [
     { value: 'h1', displayName: 'H1' },
     { value: 'h2', displayName: 'H2' },
     { value: 'h3', displayName: 'H3' },
   ],
 }
-
-// ❌ Wrong: visual styling - use displayTemplate instead
-// style: { type: 'string', enum: [{ value: 'primary' }, { value: 'secondary' }] }
-```
-
-> **Important:** For visual styling options (colors, sizes, alignment, variants), use `displayTemplate` instead of enum properties. See the Display Templates section.
-
-### Rich Text
-Formatted content with rich text editing (Slate.js format).
-
-```typescript
-body: {
-  type: 'richText',
-  displayName: 'Article Body',
-  localized: true,
-}
-```
-
-### URL vs Link
-
-**IMPORTANT DISTINCTION:**
-
-**URL Property** - For simple web addresses as strings:
-```typescript
-websiteUrl: {
-  type: 'url',
-  displayName: 'Website URL',
-  description: 'External website link',
-}
-```
-
-**Link Property** - For rich link objects with all `<a>` tag attributes (text, title, target):
-```typescript
-ctaLink: {
-  type: 'link',
-  displayName: 'Call to Action Link',
-  description: 'Link with title and target options',
-}
-```
-
-**Key difference:** Use `url` for simple URL storage, use `link` when you need text, title, and target attributes.
-
-### Boolean
-True/false checkbox.
-
-```typescript
-isPublished: {
-  type: 'boolean',
-  displayName: 'Published',
-}
-```
-
-### Integer & Float
-Whole numbers or decimal values.
-
-```typescript
-quantity: {
-  type: 'integer',
-  displayName: 'Quantity',
-  minimum: 1,
-  maximum: 100,
-}
-
-price: {
-  type: 'float',
-  displayName: 'Price',
-  minimum: 0.01,
-  maximum: 99999.99,
-}
-```
-
-### DateTime
-Date and time values with optional constraints.
-
-```typescript
-publishDate: {
-  type: 'dateTime',
-  displayName: 'Publish Date',
-  required: true,
-}
-
-eventStartTime: {
-  type: 'dateTime',
-  displayName: 'Event Start',
-  minimum: '2025-12-01T00:00:00Z',  // ISO format
-  maximum: '2025-12-31T23:59:59Z',
-}
-```
-
-### Array
-Lists of values. **Cannot contain nested arrays.**
-
-```typescript
-tags: {
-  type: 'array',
-  displayName: 'Tags',
-  items: { type: 'string' },
-  minItems: 1,
-  maxItems: 10,
-}
-
-relatedArticles: {
-  type: 'array',
-  displayName: 'Related Articles',
-  items: {
-    type: 'content',
-    allowedTypes: ['ArticlePage'],
-  },
-}
-```
-
-### Content & ContentReference
-Reference to other content items.
-
-```typescript
-featuredImage: {
-  type: 'contentReference',
-  displayName: 'Featured Image',
-  allowedTypes: ['_image'],
-}
-
-heroSection: {
-  type: 'content',
-  displayName: 'Hero Section',
-  allowedTypes: ['HeroBlock'],
-  restrictedTypes: ['_folder'],
-}
-```
-
-### Component
-Embed a specific component type (strongly typed).
-
-```typescript
-import { HeroBlockCT } from './HeroBlock';
-
-hero: {
-  type: 'component',
-  contentType: HeroBlockCT,
-  displayName: 'Hero Section',
-}
-```
-
-### Binary & JSON
-```typescript
-attachment: { type: 'binary', displayName: 'File' }
-metadata: { type: 'json', displayName: 'Metadata' }
 ```
 
 ## Property Configuration Options
 
-### Common Options
+All property types support these common options:
 
 ```typescript
 {
@@ -331,123 +222,65 @@ metadata: { type: 'json', displayName: 'Metadata' }
 
 ### Indexing Types
 
-Controls how properties are indexed for search. **Default is 'searchable'.**
-
-- **`'searchable'`** (default) - Fully indexed for full-text search
-- **`'queryable'`** - Can be filtered/sorted but not full-text searched
-- **`'disabled'`** - Not indexed at all
-
-```typescript
-properties: {
-  title: {
-    type: 'string',
-    indexingType: 'searchable',   // Full-text search
-  },
-  publishDate: {
-    type: 'dateTime',
-    indexingType: 'queryable',    // Filter/sort only
-  },
-  internalNotes: {
-    type: 'string',
-    indexingType: 'disabled',     // Not searchable
-  },
-}
-```
+- **`'searchable'`** (default) — Fully indexed for full-text search
+- **`'queryable'`** — Can be filtered/sorted but not full-text searched
+- **`'disabled'`** — Not indexed at all
 
 ## Content Relationships
 
 ### AllowedTypes & RestrictedTypes
 
-Control which content types can be referenced:
-
 ```typescript
-featuredArticle: {
-  type: 'content',
-  allowedTypes: [ArticleCT],  // Only allow Article
+featuredImage: {
+  type: 'contentReference',
+  allowedTypes: ['_image'],       // Whitelist
 }
 
 relatedContent: {
   type: 'content',
-  restrictedTypes: ['_folder'],  // Allow all except folders
+  restrictedTypes: ['_folder'],   // Blacklist
 }
 ```
 
-**AllowedTypes** - Whitelist that can include:
-- Specific content types: `[ArticleCT, VideoCT]`
-- Base types: `['_page', '_component']`
-- Self-reference: `['_self']`
+Options for both: specific content types (`[ArticleCT]`), base types (`['_page']`), self-reference (`['_self']`).
 
-**RestrictedTypes** - Blacklist using same format
+### MayContainTypes
 
-## MayContainTypes
-
-Defines which content types can be created as children. Applies to `_page`, `_experience`, and `_folder` base types.
+Defines which content types can be created as children. Applies to `_page`, `_experience`, `_folder`, and `_component` base types.
 
 ```typescript
 export const BlogPageCT = contentType({
   key: 'BlogPage',
   baseType: '_page',
-  mayContainTypes: [
-    ArticleCT,
-    '_page',     // All page types
-    '_self',     // Same type (BlogPage)
-    '*',         // Wildcard: allow all types
-  ],
+  mayContainTypes: [ArticleCT, '_page', '_self', '*'],
   properties: { /* ... */ },
 });
 ```
 
-**Options:**
-- Specific types: `[ArticleCT]`
-- Base types: `['_page', '_component']`
-- Self-reference: `['_self']`
-- **Wildcard: `['*']`** - Allow all types
-
 ## CompositionBehaviors
 
-Make components usable in Visual Builder:
+Make components usable as sections in Visual Builder:
 
 ```typescript
 export const CardBlockCT = contentType({
   key: 'CardBlock',
   baseType: '_component',
-  compositionBehaviors: ['sectionEnabled', 'elementEnabled'],  // Flexible!
+  compositionBehaviors: ['sectionEnabled'],
   properties: { /* ... */ },
 });
 ```
 
-**Options:**
-- `'sectionEnabled'` - Can be used as a section
-- `'elementEnabled'` - Can be used as an element
-- Both - Maximum flexibility
+- `'sectionEnabled'` — Can be used as a section in Visual Builder
 
-**⚠️ IMPORTANT RESTRICTIONS for `elementEnabled`**:
-
-Content types with `elementEnabled` in `compositionBehaviors` have the following restrictions. **Elements are meant to be simple, atomic components, not containers.**
-
-**FORBIDDEN property types with `elementEnabled`:**
-1. ❌ Arrays with content: `type: "array"` with `items: { type: "content" }`
-2. ❌ Content properties: `type: "content"`
-3. ❌ Component properties: `type: "component"`
-4. ❌ JSON properties: `type: "json"`
-
-**ALLOWED property types with `elementEnabled`:**
-- ✅ Simple types: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`
-- ✅ Content references: `type: "contentReference"` (for images, media)
-- ✅ Arrays of simple types: `type: "array"` with `items: { type: "string" }` etc.
-
-**When to use ONLY `sectionEnabled`** (remove `elementEnabled`):
-- Component needs to contain other content blocks
-- Component needs arrays of content items (like AccordionBlock with AccordionItems)
-- Component needs JSON data structures
-- Component acts as a container or has complex nested content
+> **Note:** Elements now use the dedicated `_element` baseType instead of `_component` with `compositionBehaviors: ['elementEnabled']`.
 
 ## Base Types
 
 | Base Type | Description | Use For |
 |-----------|-------------|---------|
 | `_page` | Pages with unique URLs | HomePage, ArticlePage, BlogPage |
-| `_component` | Reusable blocks/components | HeroBlock, CardBlock, and **elements** (with `elementEnabled`) |
+| `_component` | Reusable blocks/components | HeroBlock, CardBlock, complex blocks |
+| `_element` | Simple Visual Builder elements | ButtonElement, TitleElement, ImageElement |
 | `_section` | Visual Builder sections with layout | Custom sections |
 | `_experience` | Flexible visual page building | Dynamic experiences |
 | `_folder` | Organizing content | Asset panel organization |
@@ -455,7 +288,14 @@ Content types with `elementEnabled` in `compositionBehaviors` have the following
 | `_video` | Video media types | Custom video types |
 | `_media` | Generic media types | Documents, files |
 
-> **Note:** There is no `_element` base type. Elements are `_component` types with `compositionBehaviors: ['elementEnabled']`.
+### Elements (`_element`) vs Components (`_component`)
+
+Elements are simple, atomic Visual Builder components. Use `_element` for small units like buttons, titles, images. Use `_component` for complex blocks that contain other content.
+
+**`_element` restrictions** — These property types are **forbidden** on elements:
+- `content`, `component`, `json`, and arrays containing content items
+
+**Allowed on `_element`**: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`, `link`, `contentReference`, and arrays of simple types.
 
 ## Built-in Content Types
 
@@ -465,10 +305,25 @@ The SDK provides ready-to-use types:
 import { BlankExperienceContentType, BlankSectionContentType } from '@optimizely/cms-sdk';
 ```
 
-- **BlankExperienceContentType** - Experience with no predefined properties
-- **BlankSectionContentType** - Section with no predefined properties
+Do not create a new type called `BlankExperience` — it already exists in the CMS.
 
-**Important!** Do not create a new type called `BlankExperience` as this is already defined in the CMS by default.
+## Type Inference with ContentProps
+
+Use `ContentProps` to infer TypeScript types from content type definitions:
+
+```typescript
+import { ContentProps } from '@optimizely/cms-sdk';
+
+type ArticleProps = ContentProps<typeof ArticlePageCT>;
+// ArticleProps has typed fields: heading, body, _metadata, etc.
+```
+
+Works for content types and display templates:
+
+```typescript
+type ButtonSettings = ContentProps<typeof ButtonDisplayTemplate>;
+// ButtonSettings has typed fields like: style, size
+```
 
 ## Naming Conventions
 
@@ -478,65 +333,29 @@ import { BlankExperienceContentType, BlankSectionContentType } from '@optimizely
 | Export name | PascalCase + "CT" suffix | `HeroBlockCT`, `ArticlePageCT` |
 | Display name | Friendly with spaces | `Hero Block`, `Article Page` |
 | Property keys | camelCase | `heading`, `ctaUrl`, `backgroundImage` |
-| Property display names | Friendly | `Heading`, `CTA URL`, `Background Image` |
-| File names | Match content type key | `HeroBlock.tsx`, `ArticlePage.tsx` |
+| File names | Match content type key | `HeroBlock.ts`, `ArticlePage.ts` |
 
 ## Property Groups
 
-Organize properties in the CMS editor.
+Organize properties in the CMS editor by assigning a `group` key.
 
-### Define in Config
-
-In `optimizely.config.mjs`:
+Define groups in `optimizely.config.mjs`:
 
 ```javascript
-import { buildConfig } from '@optimizely/cms-sdk';
-
-export default buildConfig({
-  components: ['./src/components/**/*.tsx'],
-  propertyGroups: [
-    { key: 'content', displayName: 'Content', sortOrder: 1 },
-    { key: 'seo', displayName: 'SEO', sortOrder: 2 },
-    { key: 'styling', displayName: 'Styling', sortOrder: 3 },
-  ],
-});
+propertyGroups: [
+  { key: 'content', displayName: 'Content', sortOrder: 1 },
+  { key: 'seo', displayName: 'SEO', sortOrder: 2 },
+  { key: 'settings', displayName: 'Settings', sortOrder: 3 },
+],
 ```
 
-### Use in Properties
+Then use in properties: `group: 'seo'`
 
-```typescript
-properties: {
-  title: {
-    type: 'string',
-    displayName: 'Page Title',
-    group: 'seo',  // Assigns to SEO group
-  },
-}
-```
-
-**Built-in groups** (always available):
-- `Information`, `Scheduling`, `Advanced`, `Shortcut`, `Categories`, `DynamicBlocks`
-
-**Note!** The built-in group `Advanced` is named "Settings" in the CMS UI.
-
-## Common Patterns
-
-See `references/standard-types.md` for complete examples:
-- Page types: HomePage, ArticlePage, BlogPage, LandingPage
-- Components: HeroBlock, BannerBlock, CallToActionBlock, CardBlock
-- Elements: TitleElement, TextElement, ImageElement, ButtonElement
-
-See `references/composition-patterns.md` for:
-- Nested components
-- Tab and accordion patterns
-- Card grids
-- Flexible content areas
+**Built-in groups** (always available): `Information`, `Scheduling`, `Advanced`, `Shortcut`, `Categories`, `DynamicBlocks`. Note: the built-in `Advanced` group is displayed as "Settings" in the CMS UI.
 
 ## Display Templates
 
-**IMPORTANT:** Use `displayTemplate` for visual styling options instead of enum properties on content types.
-
-### When to Use Display Templates vs Enum Properties
+Use `displayTemplate` for visual styling options instead of enum properties on content types.
 
 | Use `displayTemplate` | Use `enum` property |
 |----------------------|---------------------|
@@ -547,23 +366,22 @@ See `references/composition-patterns.md` for:
 
 **Rule:** If it affects *how something looks*, use `displayTemplate`. If it affects *what something means*, use `enum`.
 
-### Basic Example
+### Example
 
 ```typescript
-import { contentType, displayTemplate, Infer } from '@optimizely/cms-sdk';
+import { contentType, displayTemplate, ContentProps } from '@optimizely/cms-sdk';
 
-// Content type - NO visual styling properties
+// Content type — NO visual styling properties
 export const ButtonElementCT = contentType({
   key: 'ButtonElement',
-  baseType: '_component',
-  compositionBehaviors: ['elementEnabled'],
+  baseType: '_element',
   properties: {
     text: { type: 'string', displayName: 'Button Text', required: true },
     link: { type: 'link', displayName: 'Link', required: true },
   },
 });
 
-// Display template - defines visual variations
+// Display template — defines visual variations
 export const ButtonDisplayTemplate = displayTemplate({
   key: 'ButtonDisplayTemplate',
   isDefault: true,
@@ -587,8 +405,8 @@ export const ButtonDisplayTemplate = displayTemplate({
 
 ```typescript
 type Props = {
-  opti: Infer<typeof ButtonElementCT>;
-  displaySettings?: Infer<typeof ButtonDisplayTemplate>;
+  opti: ContentProps<typeof ButtonElementCT>;
+  displaySettings?: ContentProps<typeof ButtonDisplayTemplate>;
 };
 
 export default function ButtonElement({ opti, displaySettings }: Props) {
@@ -597,205 +415,120 @@ export default function ButtonElement({ opti, displaySettings }: Props) {
 }
 ```
 
-See `references/standard-types.md` for complete display template examples.
+See `references/standard-types.md` for more display template examples.
 
-## Best Practices
-
-1. **Check built-in metadata first** - Use `opti._metadata.published`, `opti._metadata.created`, etc. instead of creating redundant properties
-2. **Use camelCase for property keys** - Follow SDK conventions
-3. **Add displayName always** - Makes CMS user-friendly
-4. **Export with "CT" suffix** - e.g., `HeroBlockCT`, `ArticlePageCT`
-5. **Use indexingType appropriately** - Default is 'searchable'
-6. **Distinguish url vs link** - Use `url` for simple URLs, `link` for rich links
-7. **Enable localization** - Set `localized: true` for translatable content
-8. **Use compositionBehaviors** - Make components flexible, but avoid `elementEnabled` with JSON/content properties
-9. **Control with allowedTypes** - Prevent wrong content types
-10. **Use wildcard cautiously** - `mayContainTypes: ['*']` allows all types
-11. **No nested arrays** - Arrays cannot contain array items
-12. **Use displayTemplate for styling** - Don't put visual options in content type enum properties
-
-## Optimizely CMS CLI
-
-The `@optimizely/cms-cli` tool is used to sync content types to your Optimizely SaaS CMS instance.
-
-### Installation
-
-**For a project (recommended):**
-```bash
-npm install @optimizely/cms-cli -D
-```
-
-**Global installation:**
-```bash
-npm install @optimizely/cms-cli -g
-```
-
-### Usage
-
-Run the CLI using npx:
-```bash
-npx optimizely-cms-cli
-```
-
-### Environment Variables
-
-The CLI requires authentication credentials to connect to your Optimizely SaaS CMS instance. Set these environment variables:
-
-```bash
-OPTIMIZELY_CMS_CLIENT_ID=your-client-id
-OPTIMIZELY_CMS_CLIENT_SECRET=your-client-secret
-```
-
-Add these to your `.env` or `.env.local` file for local development.
-
-### Creating optimizely.config.mjs
-
-**CRITICAL:** The config file must use `components` with **file paths as strings**. The CLI processes the files itself - do NOT import content types directly.
-
-✅ **Correct - use file paths:**
-```javascript
-import { buildConfig } from '@optimizely/cms-sdk';
-
-export default buildConfig({
-  components: [
-    // List each file containing content types or display templates
-    './src/cms/content-types/elements/ButtonElement.ts',
-    './src/cms/content-types/elements/NavLinkElement.ts',
-    './src/cms/content-types/blocks/HeroBlock.ts',
-    './src/cms/content-types/blocks/TextBlock.ts',
-    './src/cms/content-types/pages/ArticlePage.ts',
-    './src/cms/content-types/settings/HeaderSettings.ts',
-  ],
-  propertyGroups: [
-    { key: 'content', displayName: 'Content', sortOrder: 1 },
-    { key: 'seo', displayName: 'SEO', sortOrder: 2 },
-    { key: 'settings', displayName: 'Settings', sortOrder: 3 },
-  ],
-});
-```
-
-❌ **Wrong - do NOT import objects directly:**
-```javascript
-// THIS WILL CAUSE "Cannot read properties of undefined (reading 'map')" ERROR
-import { buildConfig } from '@optimizely/cms-sdk';
-import { ButtonElementCT } from './src/cms/content-types/elements/ButtonElement.ts';
-import { HeroBlockCT } from './src/cms/content-types/blocks/HeroBlock.ts';
-
-export default buildConfig({
-  contentTypes: [ButtonElementCT, HeroBlockCT],  // ❌ WRONG!
-  displayTemplates: [ButtonDisplayTemplate],      // ❌ WRONG!
-});
-```
-
-**Key points:**
-- Use `components` array with file path strings
-- The CLI automatically discovers `contentType()` and `displayTemplate()` exports from these files
-- Display templates in the same file as content types will be found automatically
-- Property groups are defined inline in the config (not as file paths)
-
-### Sync Content Types to CMS
-
-After defining content types, sync them to your CMS:
-
-```bash
-npx optimizely-cms-cli config push optimizely.config.mjs
-```
-
-### Common Commands
-
-```bash
-# Push content type configuration to CMS
-npx optimizely-cms-cli config push optimizely.config.mjs
-
-# Pull existing configuration from CMS
-npx optimizely-cms-cli config pull
-
-# View help and available commands
-npx optimizely-cms-cli --help
-```
-
-## Visual Builder Preview Setup
-
-For Visual Builder to work, you need three things:
-
-### 1. SDK Registry Initialization
-
-Create `src/optimizely.ts` and import it in your root layout:
+## GraphClient — Fetching Content
 
 ```typescript
-import {
-  initContentTypeRegistry,
-  initDisplayTemplateRegistry,
-  BlankExperienceContentType,
-  BlankSectionContentType,
-} from '@optimizely/cms-sdk';
-import { initReactComponentRegistry } from '@optimizely/cms-sdk/react/server';
+import { GraphClient } from '@optimizely/cms-sdk';
 
-// MUST include BlankExperienceContentType and BlankSectionContentType
-initContentTypeRegistry([
-  BlankExperienceContentType,
-  BlankSectionContentType,
-  // ... your content types
-]);
-
-initReactComponentRegistry({
-  resolver: {
-    BlankExperience,  // React component for experiences
-    BlankSection,     // React component for sections
-    // ... your components
-  },
+const client = new GraphClient(process.env.OPTIMIZELY_GRAPH_SINGLE_KEY!, {
+  graphUrl: process.env.OPTIMIZELY_GRAPH_GATEWAY,
 });
+
+// Fetch content by URL path
+const content = await client.getContentByPath('/about-us/');
+
+// Fetch with variation filtering
+const content = await client.getContentByPath('/products/', {
+  variation: { name: 'experiment1', value: 'variant-a' },
+});
+
+// Get breadcrumb/ancestor path
+const ancestors = await client.getPath('/blog/my-article/');
+
+// Get child pages
+const children = await client.getItems('/blog/');
+
+// Preview content (in preview route)
+const preview = await client.getPreviewContent(previewParams);
 ```
 
-### 2. Experience Components
+See `references/graph-client.md` for full API reference.
 
-Create `BlankExperience` and `BlankSection` React components. See `references/troubleshooting.md` for complete examples.
-
-### 3. Preview Route
-
-Create `app/preview/page.tsx`:
+## DAM Asset Helpers
 
 ```typescript
-import { GraphClient, type PreviewParams } from '@optimizely/cms-sdk';
-import { OptimizelyComponent } from '@optimizely/cms-sdk/react/server';
-import { PreviewComponent } from '@optimizely/cms-sdk/react/client';
-import Script from 'next/script';
+import { damAssets } from '@optimizely/cms-sdk';
 
-export default async function PreviewPage({ searchParams }: Props) {
-  const client = new GraphClient(process.env.OPTIMIZELY_GRAPH_SINGLE_KEY!, {
-    graphUrl: process.env.OPTIMIZELY_GRAPH_GATEWAY,
-  });
+export default function HeroBlock({ opti }) {
+  const { getSrcset, getAlt, isDamImageAsset } = damAssets(opti);
 
-  const response = await client.getPreviewContent(
-    (await searchParams) as PreviewParams
-  );
-
-  return (
-    <div>
-      <Script
-        src={`${process.env.OPTIMIZELY_CMS_URL}/util/javascript/communicationinjector.js`}
-        strategy="afterInteractive"
+  if (isDamImageAsset(opti.backgroundImage)) {
+    return (
+      <img
+        src={opti.backgroundImage.item.Url}
+        srcSet={getSrcset(opti.backgroundImage)}
+        alt={getAlt(opti.backgroundImage, 'Hero')}
       />
-      <PreviewComponent />
-      <OptimizelyComponent opti={response} />
-    </div>
-  );
+    );
+  }
 }
 ```
 
-### Required Environment Variables
+See `references/dam-assets.md` for full API reference.
 
-```bash
-OPTIMIZELY_CMS_URL=https://app-xxx.cms.optimizely.com
-OPTIMIZELY_GRAPH_GATEWAY=https://cg.optimizely.com/content/v2  # Include full path!
-OPTIMIZELY_GRAPH_SINGLE_KEY=your-single-key
+## React Integration
+
+### Server Components (`@optimizely/cms-sdk/react/server`)
+
+```typescript
+import {
+  initReactComponentRegistry,
+  OptimizelyComponent,
+  OptimizelyComposition,
+  OptimizelyGridSection,
+  getPreviewUtils,
+} from '@optimizely/cms-sdk/react/server';
 ```
+
+### Client Components (`@optimizely/cms-sdk/react/client`)
+
+```typescript
+import { PreviewComponent } from '@optimizely/cms-sdk/react/client';
+```
+
+See `references/react-integration.md` for full setup and usage.
+
+## Best Practices
+
+1. **Check built-in metadata first** — Use `opti._metadata.published`, `.created`, etc. instead of creating redundant date/title properties
+2. **Use camelCase for property keys** — Follow SDK conventions
+3. **Always add displayName** — Makes the CMS editor user-friendly
+4. **Export with "CT" suffix** — e.g., `HeroBlockCT`, `ArticlePageCT`
+5. **Distinguish url vs link** — `url` for simple URLs, `link` for rich links with text/title/target
+6. **Use displayTemplate for visual styling** — Don't put colors, sizes, or layout variants in content type enum properties
+7. **Use `_element` for simple Visual Builder components** — Button, Title, Image elements
+8. **Respect `_element` restrictions** — No `content`, `component`, `json`, or content arrays on elements
+9. **No nested arrays** — Arrays cannot contain array items
+10. **Config uses file paths** — `optimizely.config.mjs` must use `components` with string paths, not imported objects
+11. **Use `ContentProps<typeof X>`** — For type-safe component props inferred from content types
+12. **Use `damAssets()` for media** — Handles srcset, alt text, preview tokens automatically
+
+## CMS CLI & Syncing
+
+See `references/cli-setup.md` for full CLI documentation including installation, `optimizely.config.mjs` setup, and sync commands.
+
+Quick reference:
+```bash
+npx optimizely-cms-cli config push optimizely.config.mjs   # Push to CMS
+npx optimizely-cms-cli config pull                          # Pull from CMS
+```
+
+## Visual Builder Preview
+
+See `references/visual-builder-preview.md` for preview route setup, SDK registry initialization, and required environment variables.
 
 ## References
 
-- `references/property-types.md` - Complete property type reference
-- `references/standard-types.md` - Ready-to-use pages, blocks, elements
-- `references/validation.md` - Validation patterns and regex
-- `references/composition-patterns.md` - Advanced composition patterns
-- `references/troubleshooting.md` - Common errors and solutions
-- [CMS CLI Installation Guide](https://github.com/episerver/content-js-sdk/blob/main/docs/1-installation.md) - Official CLI documentation
+- `references/property-types.md` — Complete property type reference with all options
+- `references/standard-types.md` — Ready-to-use page, block, and element examples
+- `references/validation.md` — Validation patterns and regex examples
+- `references/composition-patterns.md` — Advanced composition and Visual Builder grid patterns
+- `references/troubleshooting.md` — Common errors and solutions
+- `references/cli-setup.md` — CMS CLI installation, config, and sync commands
+- `references/visual-builder-preview.md` — Visual Builder preview route and SDK registry setup
+- `references/graph-client.md` — GraphClient API for fetching content
+- `references/dam-assets.md` — DAM asset helpers (srcset, alt, type guards)
+- `references/react-integration.md` — React server/client component setup
+- [CMS CLI Installation Guide](https://github.com/episerver/content-js-sdk/blob/main/docs/1-installation.md) — Official CLI documentation

@@ -275,7 +275,7 @@ export const CallToActionBlockCT = contentType({
   key: 'CallToActionBlock',
   displayName: 'Call To Action Block',
   baseType: '_component',
-  compositionBehaviors: ['sectionEnabled', 'elementEnabled'],  // Works as both!
+  compositionBehaviors: ['sectionEnabled'],  // Section in Visual Builder
   properties: {
     heading: {
       type: 'string',
@@ -319,7 +319,7 @@ export const CardBlockCT = contentType({
   key: 'CardBlock',
   displayName: 'Card Block',
   baseType: '_component',
-  compositionBehaviors: ['sectionEnabled', 'elementEnabled'],  // Flexible usage
+  compositionBehaviors: ['sectionEnabled'],  // Section in Visual Builder
   properties: {
     heading: { 
       type: 'string', 
@@ -351,7 +351,7 @@ export const CardBlockCT = contentType({
 
 ## Element Types
 
-> **Important:** Elements use `_component` as the base type with `compositionBehaviors: ['elementEnabled']`. There is no `_element` base type in Optimizely CMS.
+> **Important:** Elements use the dedicated `_element` baseType. This is a simple, atomic component for Visual Builder.
 
 ### TitleElement
 
@@ -363,8 +363,7 @@ import { contentType } from '@optimizely/cms-sdk';
 export const TitleElementCT = contentType({
   key: 'TitleElement',
   displayName: 'Title Element',
-  baseType: '_component',
-  compositionBehaviors: ['elementEnabled'],
+  baseType: '_element',
   properties: {
     text: {
       type: 'string',
@@ -396,8 +395,7 @@ import { contentType } from '@optimizely/cms-sdk';
 export const ImageElementCT = contentType({
   key: 'ImageElement',
   displayName: 'Image Element',
-  baseType: '_component',
-  compositionBehaviors: ['elementEnabled'],
+  baseType: '_element',
   properties: {
     image: { 
       type: 'contentReference', 
@@ -435,8 +433,7 @@ import { contentType, displayTemplate } from '@optimizely/cms-sdk';
 export const ButtonElementCT = contentType({
   key: 'ButtonElement',
   displayName: 'Button Element',
-  baseType: '_component',
-  compositionBehaviors: ['elementEnabled'],
+  baseType: '_element',
   properties: {
     text: {
       type: 'string',
@@ -549,14 +546,13 @@ Display templates define visual variations that editors can apply to components.
 ### Basic Display Template
 
 ```typescript
-import { contentType, displayTemplate, Infer } from '@optimizely/cms-sdk';
+import { contentType, displayTemplate, ContentProps } from '@optimizely/cms-sdk';
 
 // Content type - only content properties
 export const CardBlockCT = contentType({
   key: 'CardBlock',
   displayName: 'Card Block',
-  baseType: '_component',
-  compositionBehaviors: ['elementEnabled'],
+  baseType: '_element',
   properties: {
     title: { type: 'string', displayName: 'Title', required: true },
     description: { type: 'string', displayName: 'Description' },
@@ -667,12 +663,12 @@ export const HeroCenteredTemplate = displayTemplate({
 ### Using Display Settings in Components
 
 ```typescript
-import { Infer } from '@optimizely/cms-sdk';
+import { ContentProps } from '@optimizely/cms-sdk';
 import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: Infer<typeof CardBlockCT>;
-  displaySettings?: Infer<typeof CardDisplayTemplate>;
+  opti: ContentProps<typeof CardBlockCT>;
+  displaySettings?: ContentProps<typeof CardDisplayTemplate>;
 };
 
 export default function CardBlock({ opti, displaySettings }: Props) {
@@ -792,11 +788,11 @@ showBorder: {
 ## Component Pattern
 
 ```typescript
-import { Infer } from '@optimizely/cms-sdk';
+import { ContentProps } from '@optimizely/cms-sdk';
 import { HeroBlockCT } from './HeroBlock';
 
 type Props = {
-  opti: Infer<typeof HeroBlockCT>;
+  opti: ContentProps<typeof HeroBlockCT>;
 };
 
 export default function HeroBlock({ opti }: Props) {
@@ -816,11 +812,11 @@ export default function HeroBlock({ opti }: Props) {
 ### Correct Image Rendering Pattern
 
 ```typescript
-import { Infer } from '@optimizely/cms-sdk';
+import { ContentProps } from '@optimizely/cms-sdk';
 import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: Infer<typeof HeroBlockCT>;
+  opti: ContentProps<typeof HeroBlockCT>;
 };
 
 export default function HeroBlock({ opti }: Props) {

@@ -10,15 +10,15 @@ Make components work in Visual Builder:
 export const CardBlockCT = contentType({
   key: 'CardBlock',
   baseType: '_component',
-  compositionBehaviors: ['sectionEnabled', 'elementEnabled'],  // Both!
+  compositionBehaviors: ['sectionEnabled'],
   properties: { /* ... */ },
 });
 ```
 
 **Options:**
-- `'sectionEnabled'` - Works as section
-- `'elementEnabled'` - Works as element
-- Both - Maximum flexibility
+- `'sectionEnabled'` - Works as section in Visual Builder
+
+> **Note:** Elements now use the dedicated `_element` baseType instead of `_component` with `elementEnabled`.
 
 ## MayContainTypes
 
@@ -138,10 +138,10 @@ Visual Builder experiences use a grid system with sections containing rows and c
 
 ```typescript
 // LandingPage.tsx
-import { contentType, Infer } from "@optimizely/cms-sdk";
+import { contentType, ContentProps } from "@optimizely/cms-sdk";
 import {
   ComponentContainerProps,
-  OptimizelyExperience,
+  OptimizelyComposition,
   getPreviewUtils,
 } from "@optimizely/cms-sdk/react/server";
 
@@ -155,7 +155,7 @@ export const LandingPageContentType = contentType({
 });
 
 type Props = {
-  opti: Infer<typeof LandingPageContentType>;
+  opti: ContentProps<typeof LandingPageContentType>;
 };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
@@ -166,7 +166,7 @@ function ComponentWrapper({ children, node }: ComponentContainerProps) {
 export default function LandingPage({ opti }: Props) {
   return (
     <main className="landing-page min-h-screen bg-linear-to-b from-gray-50 to-white">
-      <OptimizelyExperience
+      <OptimizelyComposition
         nodes={opti.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
@@ -181,7 +181,7 @@ Sections are full-width containers that hold rows and columns:
 
 ```typescript
 // BlankSection.tsx
-import { BlankSectionContentType, Infer } from '@optimizely/cms-sdk';
+import { BlankSectionContentType, ContentProps } from '@optimizely/cms-sdk';
 import {
   OptimizelyGridSection,
   getPreviewUtils,
@@ -189,7 +189,7 @@ import {
 } from '@optimizely/cms-sdk/react/server';
 
 type BlankSectionProps = {
-  opti: Infer<typeof BlankSectionContentType>;
+  opti: ContentProps<typeof BlankSectionContentType>;
 };
 
 export default function BlankSection({ opti }: BlankSectionProps) {
