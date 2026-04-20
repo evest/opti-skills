@@ -193,9 +193,9 @@ eventStartTime: {
 
 Lists of values. **IMPORTANT: Cannot contain nested arrays.**
 
-**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have array properties that contain content items (`type: "array"` with `items: { type: "content" }`). Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: Content types with `compositionBehaviors: ['elementEnabled']` (i.e. Visual Builder elements) **CANNOT** have array properties that contain content items (`type: "array"` with `items: { type: "content" }`). Elements are meant to be simple, atomic components, not containers.
 
-If your component needs to contain arrays of other content (like AccordionBlock with AccordionItems), use **only** `compositionBehaviors: ['sectionEnabled']`.
+If your component needs to contain arrays of other content (like AccordionBlock with AccordionItems), keep it as a block — use only `compositionBehaviors: ['sectionEnabled']`, not `['elementEnabled']`.
 
 ### String Array
 
@@ -290,9 +290,9 @@ heroSection: {
 
 **Important restriction: It is not allowed to have an inline property of type content on an element **
 
-**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have properties that are content items (`type: "content"`). Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: Content types with `compositionBehaviors: ['elementEnabled']` (i.e. Visual Builder elements) **CANNOT** have properties of type `content`. Elements are meant to be simple, atomic components, not containers.
 
-Use `ContentReference` instead to reference a shared block or page.
+Use `contentReference` instead to reference a shared block or page.
 
 ## Component Property
 
@@ -342,7 +342,7 @@ metadata: {
 
 **Use for:** Structured metadata, configuration data, flexible data storage
 
-**⚠️ IMPORTANT RESTRICTION**: `_element` content types **CANNOT** have properties that are of  type `json`. Elements are meant to be simple, atomic components, not containers.
+**⚠️ IMPORTANT RESTRICTION**: Content types with `compositionBehaviors: ['elementEnabled']` (i.e. Visual Builder elements) **CANNOT** have properties of type `json`. Elements are meant to be simple, atomic components, not containers.
 
 
 ## Indexing Types

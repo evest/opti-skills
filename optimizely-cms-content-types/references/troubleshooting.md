@@ -4,7 +4,7 @@ Common issues and solutions when working with Optimizely CMS content types and R
 
 ## Table of Contents
 
-- [CMS Sync Errors](#cms-sync-errors) — Config push failures, unsupported base types, _element restrictions
+- [CMS Sync Errors](#cms-sync-errors) — Config push failures, unsupported base types, element restrictions
 - [TypeScript Build Errors](#typescript-build-errors) — Module imports, property type casing, missing properties
 - [Display Template Errors](#display-template-errors) — Template type issues, RichText props, light/dark mode
 - [Property Type Issues](#property-type-issues) — Numeric types, default values, arrays of content
@@ -67,38 +67,39 @@ export default buildConfig({
 
 **Error**: When pushing config to CMS, you get an error about certain property types not being allowed on element types.
 
-**Cause**: Optimizely CMS restricts `_element` content types from having certain complex property types. Elements are meant to be simple, atomic components, not containers.
+**Cause**: Optimizely CMS restricts content types with `compositionBehaviors: ['elementEnabled']` (Visual Builder elements) from having certain complex property types. Elements are meant to be simple, atomic components, not containers.
 
-**FORBIDDEN property types on `_element`:**
+**FORBIDDEN property types on elements (`_component` + `elementEnabled`):**
 1. ❌ Arrays with content: `type: "array"` with `items: { type: "content" }`
 2. ❌ Content properties: `type: "content"`
 3. ❌ Component properties: `type: "component"`
 4. ❌ JSON properties: `type: "json"`
 
-**ALLOWED property types on `_element`:**
+**ALLOWED property types on elements:**
 - ✅ Simple types: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`, `link`
 - ✅ Content references: `type: "contentReference"` (for images, media)
 - ✅ Arrays of simple types: `type: "array"` with `items: { type: "string" }` etc.
 
 **Solution options:**
 
-1. **Use `_component` with `sectionEnabled` instead** - If the component needs complex properties:
+1. **Use `_component` with only `sectionEnabled`** - If the component needs complex properties, keep it as a block (section) and remove `elementEnabled`:
    ```typescript
    baseType: '_component',
-   compositionBehaviors: ['sectionEnabled'],
+   compositionBehaviors: ['sectionEnabled'], // no elementEnabled
    ```
 
-2. **Remove the complex property** - If you want to keep it as an element, simplify the data model
+2. **Remove the complex property** - If you want the component to remain an element, simplify the data model (e.g. replace a `ctas: array<content>` with `primaryCta: link` + `secondaryCta: link`)
 
 **Example:**
 
 ```typescript
-// ❌ This will fail when syncing to CMS
+// ❌ This will fail when syncing to CMS — elements can't have content arrays
 export const AccordionBlockType = contentType({
   key: "AccordionBlock",
-  baseType: "_element",  // Elements can't have content arrays
+  baseType: "_component",
+  compositionBehaviors: ["elementEnabled"], // element restriction kicks in
   properties: {
-    items: {  // Array of content - NOT ALLOWED on _element!
+    items: {  // Array of content - NOT ALLOWED on elements!
       type: "array",
       items: {
         type: "content",
@@ -108,7 +109,7 @@ export const AccordionBlockType = contentType({
   },
 });
 
-// ✅ Fixed - use _component with sectionEnabled for complex blocks
+// ✅ Fixed - use only sectionEnabled for complex blocks
 export const AccordionBlockType = contentType({
   key: "AccordionBlock",
   baseType: "_component",

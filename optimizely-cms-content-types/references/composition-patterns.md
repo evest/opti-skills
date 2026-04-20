@@ -17,8 +17,9 @@ export const CardBlockCT = contentType({
 
 **Options:**
 - `'sectionEnabled'` - Works as section in Visual Builder
+- `'elementEnabled'` - Works as an element inside an Experience composition (column/row). This is the correct way to define Visual Builder elements.
 
-> **Note:** Elements now use the dedicated `_element` baseType instead of `_component` with `elementEnabled`.
+> **Note:** Elements use `baseType: '_component'` with `compositionBehaviors: ['elementEnabled']`. There is no separate `_element` baseType. See https://github.com/episerver/content-js-sdk/blob/main/docs/8-experience.md
 
 ## MayContainTypes
 

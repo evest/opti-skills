@@ -351,7 +351,7 @@ export const CardBlockCT = contentType({
 
 ## Element Types
 
-> **Important:** Elements use the dedicated `_element` baseType. This is a simple, atomic component for Visual Builder.
+> **Important:** Elements use `baseType: '_component'` with `compositionBehaviors: ['elementEnabled']`. There is no separate `_element` baseType. See https://github.com/episerver/content-js-sdk/blob/main/docs/8-experience.md
 
 ### TitleElement
 
@@ -363,7 +363,8 @@ import { contentType } from '@optimizely/cms-sdk';
 export const TitleElementCT = contentType({
   key: 'TitleElement',
   displayName: 'Title Element',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
   properties: {
     text: {
       type: 'string',
@@ -395,7 +396,8 @@ import { contentType } from '@optimizely/cms-sdk';
 export const ImageElementCT = contentType({
   key: 'ImageElement',
   displayName: 'Image Element',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
   properties: {
     image: { 
       type: 'contentReference', 
@@ -433,7 +435,8 @@ import { contentType, displayTemplate } from '@optimizely/cms-sdk';
 export const ButtonElementCT = contentType({
   key: 'ButtonElement',
   displayName: 'Button Element',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
   properties: {
     text: {
       type: 'string',
@@ -552,7 +555,8 @@ import { contentType, displayTemplate, ContentProps } from '@optimizely/cms-sdk'
 export const CardBlockCT = contentType({
   key: 'CardBlock',
   displayName: 'Card Block',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['sectionEnabled'],
   properties: {
     title: { type: 'string', displayName: 'Title', required: true },
     description: { type: 'string', displayName: 'Description' },

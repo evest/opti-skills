@@ -10,7 +10,7 @@ Generate TypeScript content type definitions for Optimizely SaaS CMS using the `
 **Key capabilities:**
 - **Pages** (`_page`): HomePage, ArticlePage, BlogPage with unique URLs
 - **Components** (`_component`): HeroBlock, BannerBlock, CardBlock — reusable blocks
-- **Elements** (`_element`): Smaller Visual Builder elements (title, button, image)
+- **Elements** (`_component` + `compositionBehaviors: ['elementEnabled']`): Smaller Visual Builder elements (title, button, image)
 - **Sections** (`_section`): Visual Builder sections with layout system
 - **Experiences** (`_experience`): Flexible visual page building
 - **Composition**: Make components work as sections with `compositionBehaviors: ['sectionEnabled']`
@@ -67,7 +67,8 @@ export const HeroBlockCT = contentType({
 export const ButtonElementCT = contentType({
   key: 'ButtonElement',
   displayName: 'Button Element',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
   properties: {
     text: { type: 'string', displayName: 'Button Text', required: true },
     link: { type: 'link', displayName: 'Link', required: true },
@@ -271,16 +272,25 @@ export const CardBlockCT = contentType({
 ```
 
 - `'sectionEnabled'` — Can be used as a section in Visual Builder
+- `'elementEnabled'` — Can be used as an element inside an Experience composition (columns/rows). This is the correct way to define elements. Per the official docs: https://github.com/episerver/content-js-sdk/blob/main/docs/8-experience.md
 
-> **Note:** Elements now use the dedicated `_element` baseType instead of `_component` with `compositionBehaviors: ['elementEnabled']`.
+```typescript
+export const ButtonElementCT = contentType({
+  key: 'ButtonElement',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
+  properties: { /* ... */ },
+});
+```
+
+Both behaviors can coexist (`['sectionEnabled', 'elementEnabled']`) on a single content type if it should work as both a section and an element.
 
 ## Base Types
 
 | Base Type | Description | Use For |
 |-----------|-------------|---------|
 | `_page` | Pages with unique URLs | HomePage, ArticlePage, BlogPage |
-| `_component` | Reusable blocks/components | HeroBlock, CardBlock, complex blocks |
-| `_element` | Simple Visual Builder elements | ButtonElement, TitleElement, ImageElement |
+| `_component` | Reusable blocks/components (also elements via `elementEnabled`) | HeroBlock, CardBlock, ButtonElement, TitleElement |
 | `_section` | Visual Builder sections with layout | Custom sections |
 | `_experience` | Flexible visual page building | Dynamic experiences |
 | `_folder` | Organizing content | Asset panel organization |
@@ -288,14 +298,25 @@ export const CardBlockCT = contentType({
 | `_video` | Video media types | Custom video types |
 | `_media` | Generic media types | Documents, files |
 
-### Elements (`_element`) vs Components (`_component`)
+### Elements vs Blocks (both use `_component`)
 
-Elements are simple, atomic Visual Builder components. Use `_element` for small units like buttons, titles, images. Use `_component` for complex blocks that contain other content.
+Elements and blocks share the same `_component` base type. The difference is which `compositionBehaviors` the content type declares:
 
-**`_element` restrictions** — These property types are **forbidden** on elements:
-- `content`, `component`, `json`, and arrays containing content items
+- **Block only** — plain `_component` with no composition behaviors, or just `['sectionEnabled']`.
+- **Element** — `_component` + `compositionBehaviors: ['elementEnabled']`. Makes it placeable inside a Visual Builder column/row.
+- **Both** — `compositionBehaviors: ['sectionEnabled', 'elementEnabled']`.
 
-**Allowed on `_element`**: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`, `link`, `contentReference`, and arrays of simple types.
+Elements are meant to be simple, atomic units (button, title, image, text). Blocks are larger composite components. This is a semantic distinction, not a type-system one.
+
+**Element property restrictions** — These property types are unreliable or forbidden on content types with `elementEnabled`:
+- `content` (inline content property)
+- `component` (inline strongly-typed component)
+- `json`
+- Arrays of content items (`type: 'array'` with `items: { type: 'content' }`)
+
+**Safe property types on elements**: `string`, `boolean`, `integer`, `float`, `dateTime`, `url`, `richText`, `link`, `contentReference` (for media), and arrays of simple scalars.
+
+> If a `_component` should work as both a block and an element, design its properties to respect the element restrictions — e.g. use fixed individual `link` properties (`primaryCta`, `secondaryCta`) instead of an array of content CTAs.
 
 ## Built-in Content Types
 
@@ -374,7 +395,8 @@ import { contentType, displayTemplate, ContentProps } from '@optimizely/cms-sdk'
 // Content type — NO visual styling properties
 export const ButtonElementCT = contentType({
   key: 'ButtonElement',
-  baseType: '_element',
+  baseType: '_component',
+  compositionBehaviors: ['elementEnabled'],
   properties: {
     text: { type: 'string', displayName: 'Button Text', required: true },
     link: { type: 'link', displayName: 'Link', required: true },
@@ -498,8 +520,8 @@ See `references/react-integration.md` for full setup and usage.
 4. **Export with "CT" suffix** — e.g., `HeroBlockCT`, `ArticlePageCT`
 5. **Distinguish url vs link** — `url` for simple URLs, `link` for rich links with text/title/target
 6. **Use displayTemplate for visual styling** — Don't put colors, sizes, or layout variants in content type enum properties
-7. **Use `_element` for simple Visual Builder components** — Button, Title, Image elements
-8. **Respect `_element` restrictions** — No `content`, `component`, `json`, or content arrays on elements
+7. **Use `_component` + `compositionBehaviors: ['elementEnabled']` for Visual Builder elements** — Button, Title, Image, etc. Per official docs: https://github.com/episerver/content-js-sdk/blob/main/docs/8-experience.md
+8. **Respect element property restrictions** — On any `_component` with `elementEnabled`, avoid `content`, `component`, `json`, and arrays of content items
 9. **No nested arrays** — Arrays cannot contain array items
 10. **Config uses file paths** — `optimizely.config.mjs` must use `components` with string paths, not imported objects
 11. **Use `ContentProps<typeof X>`** — For type-safe component props inferred from content types
