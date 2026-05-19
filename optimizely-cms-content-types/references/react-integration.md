@@ -1,6 +1,8 @@
-# React Integration Reference
+# React Integration Reference (v2)
 
-The SDK provides React components for rendering CMS content with Visual Builder support. First-class support for React 19 and Next.js App Router.
+The SDK provides React helpers for rendering CMS content with Visual Builder support. First-class support for React 19 and Next.js App Router.
+
+> This page covers the **component-pattern API** that content-type developers consume. Full Next.js wiring (root layout, preview route, ISR, middleware, image loaders) lives in the `optimizely-cms-nextjs` skill.
 
 ## Exports
 
@@ -13,6 +15,12 @@ import {
   OptimizelyComposition,
   OptimizelyGridSection,
   getPreviewUtils,
+  withAppContext,
+  getContext,
+  getContextData,
+  setContext,
+  type ComponentContainerProps,
+  type StructureContainerProps,
 } from '@optimizely/cms-sdk/react/server';
 ```
 
@@ -28,16 +36,22 @@ import { PreviewComponent } from '@optimizely/cms-sdk/react/client';
 import { RichText } from '@optimizely/cms-sdk/react/richText';
 ```
 
+See `references/rich-text.md` for the RichText API surface.
+
 ## Component Registry
 
 Register your React components so the SDK can resolve them from content types:
 
 ```typescript
 // src/optimizely.ts
-import { initContentTypeRegistry, initDisplayTemplateRegistry, BlankExperienceContentType, BlankSectionContentType } from '@optimizely/cms-sdk';
+import {
+  initContentTypeRegistry,
+  initDisplayTemplateRegistry,
+  BlankExperienceContentType,
+  BlankSectionContentType,
+} from '@optimizely/cms-sdk';
 import { initReactComponentRegistry } from '@optimizely/cms-sdk/react/server';
 
-// Register content types
 initContentTypeRegistry([
   BlankExperienceContentType,
   BlankSectionContentType,
@@ -47,31 +61,33 @@ initContentTypeRegistry([
   // ... all content types
 ]);
 
-// Register display templates
 initDisplayTemplateRegistry([
   HeroDefaultTemplate,
   ButtonDisplayTemplate,
   // ... all display templates
 ]);
 
-// Map content types to React components
 initReactComponentRegistry({
   resolver: {
     // Simple mapping: content type key → component
-    'ArticlePage': ArticlePage,
-    'HeroBlock': HeroBlock,
-    'ButtonElement': ButtonElement,
-    'BlankExperience': BlankExperience,
-    'BlankSection': BlankSection,
+    ArticlePage,
+    HeroBlock,
+    ButtonElement,
+    BlankExperience,
+    BlankSection,
 
-    // Tagged variants using 'ContentType:Tag' syntax
-    'HeroBlock:Centered': CenteredHeroBlock,
-
-    // Or with default + tags object
-    'CardBlock': {
+    // Component variants (two equivalent patterns)
+    // Pattern A — object form (recommended for many variants)
+    CardBlock: {
       default: DefaultCardBlock,
-      tags: { Christmas: ChristmasCardBlock },
+      tags: {
+        Christmas: ChristmasCardBlock,
+        Summer: SummerCardBlock,
+      },
     },
+
+    // Pattern B — colon syntax (concise for one or two)
+    'HeroBlock:Centered': CenteredHeroBlock,
   },
 });
 ```
@@ -82,9 +98,17 @@ Import this file in your root layout:
 import '@/optimizely';
 ```
 
-### Dynamic Resolver
+### Resolver dispatch order
 
-For advanced cases (lazy loading, conditional rendering):
+When the SDK looks up a component for content of type `X` with display template `tag: 'Y'`:
+1. Try the tagged variant — `tags.Y` (object form) or `'X:Y'` (colon form).
+2. Fall back to `default` (object form) or the bare `X` (colon form).
+
+Both registration patterns are interchangeable — mix freely.
+
+### Dynamic resolver
+
+For lazy loading or runtime decisions:
 
 ```typescript
 initReactComponentRegistry({
@@ -104,33 +128,37 @@ Renders a single content item by resolving it to the registered React component.
 ```typescript
 import { OptimizelyComponent } from '@optimizely/cms-sdk/react/server';
 
-// In a page component
 <OptimizelyComponent content={contentData} />
 
-// With display settings
+// With explicit display settings (rare; usually inferred from CMS)
 <OptimizelyComponent content={contentData} displaySettings={{ variant: 'outlined' }} />
 ```
 
 **Props:**
-- `content` — Content data from GraphClient (must have `__typename`)
-- `displaySettings?` — Record of display setting values
+- `content` — content data from a GraphClient method (must include `__typename`)
+- `displaySettings?` — record of display setting values
 
 ## OptimizelyComposition
 
-Renders Visual Builder experience nodes (sections, rows, columns, elements).
+Renders Visual Builder experience nodes (sections, rows, columns, components).
 
 ```typescript
-import { OptimizelyComposition, type ComponentContainerProps } from '@optimizely/cms-sdk/react/server';
+import {
+  OptimizelyComposition,
+  getPreviewUtils,
+  type ComponentContainerProps,
+} from '@optimizely/cms-sdk/react/server';
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
-  return <div data-type={node.type}>{children}</div>;
+  const { pa } = getPreviewUtils(node);
+  return <div {...pa(node)}>{children}</div>;
 }
 
-export default function LandingPage({ opti }) {
+export default function LandingPage({ content }) {
   return (
     <main>
       <OptimizelyComposition
-        nodes={opti.composition.nodes ?? []}
+        nodes={content.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
     </main>
@@ -139,12 +167,12 @@ export default function LandingPage({ opti }) {
 ```
 
 **Props:**
-- `nodes: ExperienceNode[]` — Composition nodes from the experience
-- `ComponentWrapper?` — Optional wrapper for component nodes
+- `nodes: ExperienceNode[]` — composition nodes from the experience
+- `ComponentWrapper?` — optional wrapper around each component node (this is where you attach preview attributes for click-to-edit)
 
 ## OptimizelyGridSection
 
-Renders the grid layout (rows + columns) within a section.
+Renders the grid layout (rows + columns) inside a section.
 
 ```typescript
 import {
@@ -153,19 +181,19 @@ import {
   type StructureContainerProps,
 } from '@optimizely/cms-sdk/react/server';
 
-export default function BlankSection({ opti }) {
-  const { pa } = getPreviewUtils(opti);
+export default function BlankSection({ content }) {
+  const { pa } = getPreviewUtils(content);
 
   return (
-    <section className="w-full py-12 px-4" {...pa(opti)}>
+    <section className="w-full py-12 px-4" {...pa(content)}>
       <div className="max-w-7xl mx-auto">
-        <OptimizelyGridSection nodes={opti.nodes} row={Row} column={Column} />
+        <OptimizelyGridSection nodes={content.nodes} row={Row} column={Column} />
       </div>
     </section>
   );
 }
 
-function Row({ children, node }: StructureContainerProps) {
+function Row({ children, node, displaySettings }: StructureContainerProps) {
   const { pa } = getPreviewUtils(node);
   return (
     <div className="flex flex-row gap-6" {...pa(node)}>
@@ -174,7 +202,7 @@ function Row({ children, node }: StructureContainerProps) {
   );
 }
 
-function Column({ children, node }: StructureContainerProps) {
+function Column({ children, node, displaySettings }: StructureContainerProps) {
   const { pa } = getPreviewUtils(node);
   return (
     <div className="flex-1 flex flex-col gap-4 min-w-0" {...pa(node)}>
@@ -185,9 +213,16 @@ function Column({ children, node }: StructureContainerProps) {
 ```
 
 **Props:**
-- `nodes: ExperienceNode[]` — Grid nodes (rows, columns, components)
-- `row?` — Custom row container component
-- `column?` — Custom column container component
+- `nodes: ExperienceNode[]` — grid nodes (rows, columns, components)
+- `row?` — custom row container component
+- `column?` — custom column container component
+
+`StructureContainerProps` includes:
+- `children` — rendered child content
+- `node` — the structure node (`key`, `displayTemplateKey`, etc.)
+- `displaySettings` — display settings from `nodeType: 'row'` / `'column'` templates (when defined)
+
+You can read `displaySettings` to apply row/column-level styling (gaps, padding, alignment) driven by editor choices in the CMS. See `references/composition-patterns.md` for a worked example.
 
 ## getPreviewUtils
 
@@ -196,13 +231,13 @@ Returns context-aware preview helpers for Visual Builder on-page editing.
 ```typescript
 import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
-export default function HeroBlock({ opti }) {
-  const { pa, src } = getPreviewUtils(opti);
+export default function HeroBlock({ content }) {
+  const { pa, src } = getPreviewUtils(content);
 
   return (
-    <div {...pa(opti)}>
-      <h1 {...pa('title')}>{opti.title}</h1>
-      <img src={src(opti.backgroundImage)} alt="" />
+    <div {...pa(content)}>
+      <h1 {...pa('title')}>{content.title}</h1>
+      <img src={src(content.backgroundImage)} alt="" />
     </div>
   );
 }
@@ -213,33 +248,68 @@ export default function HeroBlock({ opti }) {
 Returns `data-epi-*` attributes for on-page editing overlays.
 
 ```typescript
-const { pa } = getPreviewUtils(opti);
+const { pa } = getPreviewUtils(content);
 
-// For the whole component (block-level)
-<div {...pa(opti)}>
+// For the whole component (block-level overlay)
+<div {...pa(content)}>
 
 // For a specific property
-<h1 {...pa('title')}>{opti.title}</h1>
+<h1 {...pa('title')}>{content.title}</h1>
 
-// With key object
-<p {...pa({ key: 'description' })}>{opti.description}</p>
+// With a key object (rarely needed)
+<p {...pa({ key: 'description' })}>{content.description}</p>
 ```
 
 ### `src(input)`
 
-Appends preview token to image URLs for preview mode. Returns `string | undefined`.
+Resolves a content-reference URL. In preview mode, automatically appends the active preview token. Returns `string | undefined`.
 
 ```typescript
-const { src } = getPreviewUtils(opti);
+const { src } = getPreviewUtils(content);
 
-<img src={src(opti.heroImage)} alt="" />
-// In preview: adds ?preview_token=xxx
-// In production: returns the URL as-is
+<img src={src(content.heroImage)} alt="" />
+// In preview: '…?preview_token=xxx'
+// In production: the URL as-is
 ```
+
+## withAppContext, getContext, getContextData, setContext
+
+`withAppContext` is a server-side HOC that initialises request-scoped context storage. `getPreviewContent` and other SDK calls populate it with `preview_token`, `locale`, `key`, `version`, `mode`.
+
+```typescript
+import {
+  withAppContext,
+  getContextData,
+} from '@optimizely/cms-sdk/react/server';
+
+function Page({ searchParams }: Props) {
+  return /* ... */;
+}
+
+export default withAppContext(Page);
+```
+
+Inside any nested component:
+
+```typescript
+import { getContextData } from '@optimizely/cms-sdk/react/server';
+
+export function PreviewBanner() {
+  const preview_token = getContextData('preview_token');
+  const locale = getContextData('locale');
+
+  if (!preview_token) return null;
+  return <div>Preview mode — locale: {locale ?? 'default'}</div>;
+}
+```
+
+`setContext({ … })` lets you push your own request-scoped data into the context (useful inside catch-all pages to expose the resolved content metadata to nested components).
+
+Detailed preview-route wiring, error handling, and locale bridging belong to the `optimizely-cms-nextjs` skill.
 
 ## PreviewComponent (Client)
 
-Client component that listens for CMS content saved events and refreshes the preview.
+Client component that listens for CMS content-saved events and refreshes the preview.
 
 ```typescript
 // Only use in preview routes
@@ -255,26 +325,25 @@ export default function PreviewPage() {
 }
 ```
 
-## RichText Component
-
-Renders rich text content from the CMS.
+## RichText (quick reference)
 
 ```typescript
 import { RichText } from '@optimizely/cms-sdk/react/richText';
 
-export default function ArticlePage({ opti }) {
+export default function ArticlePage({ content }) {
   return (
-    <article>
-      <RichText content={opti.body?.json} className="prose" />
+    <article className="prose">
+      <RichText content={content.body?.json} />
     </article>
   );
 }
 ```
 
+`RichText` does not accept `className` — wrap it. Full reference in `references/rich-text.md`.
+
 ## Complete Example: Experience Page
 
 ```typescript
-// src/components/LandingPage.tsx
 import { contentType, ContentProps, BlankExperienceContentType } from '@optimizely/cms-sdk';
 import {
   OptimizelyComposition,
@@ -289,18 +358,18 @@ export const LandingPageCT = contentType({
   properties: {},
 });
 
-type Props = { opti: ContentProps<typeof LandingPageCT> };
+type Props = { content: ContentProps<typeof LandingPageCT> };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
   const { pa } = getPreviewUtils(node);
   return <div {...pa(node)}>{children}</div>;
 }
 
-export default function LandingPage({ opti }: Props) {
+export default function LandingPage({ content }: Props) {
   return (
     <main>
       <OptimizelyComposition
-        nodes={opti.composition.nodes ?? []}
+        nodes={content.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
     </main>
@@ -324,7 +393,6 @@ import type {
   ContentReferenceItem,
 } from '@optimizely/cms-sdk';
 
-// From react/server
 import type {
   StructureContainerProps,
   ComponentContainerProps,

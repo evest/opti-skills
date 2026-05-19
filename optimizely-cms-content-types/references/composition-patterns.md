@@ -156,7 +156,7 @@ export const LandingPageContentType = contentType({
 });
 
 type Props = {
-  opti: ContentProps<typeof LandingPageContentType>;
+  content: ContentProps<typeof LandingPageContentType>;
 };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
@@ -164,11 +164,11 @@ function ComponentWrapper({ children, node }: ComponentContainerProps) {
   return <div {...pa(node)}>{children}</div>;
 }
 
-export default function LandingPage({ opti }: Props) {
+export default function LandingPage({ content }: Props) {
   return (
     <main className="landing-page min-h-screen bg-linear-to-b from-gray-50 to-white">
       <OptimizelyComposition
-        nodes={opti.composition.nodes ?? []}
+        nodes={content.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
     </main>
@@ -190,25 +190,25 @@ import {
 } from '@optimizely/cms-sdk/react/server';
 
 type BlankSectionProps = {
-  opti: ContentProps<typeof BlankSectionContentType>;
+  content: ContentProps<typeof BlankSectionContentType>;
 };
 
-export default function BlankSection({ opti }: BlankSectionProps) {
-  const { pa } = getPreviewUtils(opti)
+export default function BlankSection({ content }: BlankSectionProps) {
+  const { pa } = getPreviewUtils(content);
   return (
     <section
       className="vb:grid relative w-full py-12 px-4 md:px-6 lg:px-8 overflow-visible"
-      {...pa(opti)}
+      {...pa(content)}
     >
       <div className="max-w-7xl mx-auto w-full">
-        <OptimizelyGridSection nodes={opti.nodes} row={Row} column={Column} />
+        <OptimizelyGridSection nodes={content.nodes} row={Row} column={Column} />
       </div>
     </section>
-  )
+  );
 }
 
-function Row({ children, node }: StructureContainerProps) {
-  const { pa } = getPreviewUtils(node)
+function Row({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
   return (
     <div
       className="vb:row flex flex-row gap-6 lg:gap-8 mb-6 last:mb-0"
@@ -216,11 +216,11 @@ function Row({ children, node }: StructureContainerProps) {
     >
       {children}
     </div>
-  )
+  );
 }
 
-function Column({ children, node }: StructureContainerProps) {
-  const { pa } = getPreviewUtils(node)
+function Column({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
   return (
     <div
       className="vb:col flex-1 flex flex-col gap-4 min-w-0"
@@ -228,7 +228,7 @@ function Column({ children, node }: StructureContainerProps) {
     >
       {children}
     </div>
-  )
+  );
 }
 ```
 
@@ -237,6 +237,28 @@ function Column({ children, node }: StructureContainerProps) {
 - **Row**: Flex row with gaps between columns, stacks multiple rows vertically
 - **Column**: Equal-width columns (`flex-1`) that contain elements, `min-w-0` prevents overflow
 - **Visual Builder classes**: `vb:grid`, `vb:row`, `vb:col` for editor integration
+
+### Row/Column display settings
+
+`StructureContainerProps` carries a `displaySettings` field populated from any `nodeType: 'row'` or `nodeType: 'column'` display templates registered for the project. Read it to apply editor-driven styling per row/column:
+
+```tsx
+function Row({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
+  const gap = displaySettings?.columnGap ?? 'medium';
+  const align = displaySettings?.verticalAlignment ?? 'start';
+  return (
+    <div
+      className={cn('flex flex-row', gapClass[gap], alignClass[align])}
+      {...pa(node)}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+Define the row template via `displayTemplate({ nodeType: 'row', settings: { … } })` — see `references/standard-types.md` for the schema shape.
 
 ### Preview Mode CSS
 

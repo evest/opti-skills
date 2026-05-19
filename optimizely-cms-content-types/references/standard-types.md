@@ -664,6 +664,88 @@ export const HeroCenteredTemplate = displayTemplate({
 });
 ```
 
+### Row and Column Display Templates (Visual Builder grid)
+
+Target a structural node with `nodeType: 'row'` or `nodeType: 'column'`. The settings become available to your custom `row`/`column` containers via `StructureContainerProps.displaySettings`.
+
+```typescript
+export const StandardRowDisplayTemplate = displayTemplate({
+  key: 'StandardRowDisplayTemplate',
+  isDefault: true,
+  displayName: 'Standard Row',
+  nodeType: 'row',
+  settings: {
+    columnGap: {
+      editor: 'select',
+      displayName: 'Column gap',
+      sortOrder: 0,
+      choices: {
+        none: { displayName: 'None', sortOrder: 1 },
+        small: { displayName: 'Small', sortOrder: 2 },
+        medium: { displayName: 'Medium', sortOrder: 3 },
+        large: { displayName: 'Large', sortOrder: 4 },
+      },
+    },
+    verticalAlignment: {
+      editor: 'select',
+      displayName: 'Vertical alignment',
+      sortOrder: 1,
+      choices: {
+        start: { displayName: 'Top', sortOrder: 1 },
+        center: { displayName: 'Center', sortOrder: 2 },
+        end: { displayName: 'Bottom', sortOrder: 3 },
+        stretch: { displayName: 'Stretch', sortOrder: 4 },
+      },
+    },
+  },
+});
+
+export const StandardColumnDisplayTemplate = displayTemplate({
+  key: 'StandardColumnDisplayTemplate',
+  isDefault: true,
+  displayName: 'Standard Column',
+  nodeType: 'column',
+  settings: {
+    columnPadding: {
+      editor: 'select',
+      displayName: 'Padding',
+      sortOrder: 0,
+      choices: {
+        none: { displayName: 'None', sortOrder: 1 },
+        small: { displayName: 'Small', sortOrder: 2 },
+        medium: { displayName: 'Medium', sortOrder: 3 },
+        large: { displayName: 'Large', sortOrder: 4 },
+      },
+    },
+    hideOnMobile: {
+      editor: 'checkbox',
+      displayName: 'Hide on mobile',
+      sortOrder: 1,
+      choices: {
+        true: { displayName: 'Hidden', sortOrder: 1 },
+        false: { displayName: 'Visible', sortOrder: 2 },
+      },
+    },
+  },
+});
+```
+
+Consume in the section's row/column containers:
+
+```typescript
+function Row({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
+  const gap = displaySettings?.columnGap ?? 'medium';
+  return (
+    <div className={cn('flex flex-row', gapClass[gap])} {...pa(node)}>
+      {children}
+    </div>
+  );
+}
+```
+
+See `references/composition-patterns.md` for the full section/row/column pattern.
+
 ### Using Display Settings in Components
 
 ```typescript
@@ -671,28 +753,65 @@ import { ContentProps } from '@optimizely/cms-sdk';
 import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: ContentProps<typeof CardBlockCT>;
+  content: ContentProps<typeof CardBlockCT>;
   displaySettings?: ContentProps<typeof CardDisplayTemplate>;
 };
 
-export default function CardBlock({ opti, displaySettings }: Props) {
-  const { pa } = getPreviewUtils(opti);
+export default function CardBlock({ content, displaySettings }: Props) {
+  const { pa, src } = getPreviewUtils(content);
 
   return (
     <div
       className={`card card--${displaySettings?.variant ?? 'default'}`}
       data-image-position={displaySettings?.imagePosition ?? 'top'}
-      {...pa(opti)}
+      {...pa(content)}
     >
-      {opti.image?.url?.default && (
-        <img src={opti.image.url.default} alt="" {...pa('image')} />
+      {content.image && (
+        <img src={src(content.image)} alt="" {...pa('image')} />
       )}
-      <h3 {...pa('title')}>{opti.title}</h3>
-      <p {...pa('description')}>{opti.description}</p>
+      <h3 {...pa('title')}>{content.title}</h3>
+      <p {...pa('description')}>{content.description}</p>
     </div>
   );
 }
 ```
+
+### Component Variants — Two Registration Patterns
+
+When a display template declares `tag: 'Square'`, the SDK looks for a registered variant before falling back to the default component. Both patterns below are equivalent — pick whichever reads better in your project.
+
+**Pattern A — object form (recommended for multiple variants):**
+
+```typescript
+import { initReactComponentRegistry } from '@optimizely/cms-sdk/react/server';
+import Tile, { SquareTile, RoundTile } from '@/components/Tile';
+
+initReactComponentRegistry({
+  resolver: {
+    Tile: {
+      default: Tile,
+      tags: {
+        Square: SquareTile,
+        Round: RoundTile,
+      },
+    },
+  },
+});
+```
+
+**Pattern B — colon syntax (concise for one or two variants):**
+
+```typescript
+initReactComponentRegistry({
+  resolver: {
+    Tile: Tile,                   // default / fallback
+    'Tile:Square': SquareTile,    // variant for tag 'Square'
+    'Tile:Round': RoundTile,      // variant for tag 'Round'
+  },
+});
+```
+
+The SDK first checks the tagged variant; if not found it falls back to the default.
 
 ### Registering Display Templates
 
@@ -796,14 +915,14 @@ import { ContentProps } from '@optimizely/cms-sdk';
 import { HeroBlockCT } from './HeroBlock';
 
 type Props = {
-  opti: ContentProps<typeof HeroBlockCT>;
+  content: ContentProps<typeof HeroBlockCT>;
 };
 
-export default function HeroBlock({ opti }: Props) {
+export default function HeroBlock({ content }: Props) {
   return (
     <div className="hero">
-      <h1>{opti.title}</h1>
-      <p>{opti.subtitle}</p>
+      <h1>{content.title}</h1>
+      <p>{content.subtitle}</p>
     </div>
   );
 }
@@ -811,7 +930,7 @@ export default function HeroBlock({ opti }: Props) {
 
 ## Rendering Images from Content References
 
-**CRITICAL**: Image URLs from Optimizely content references use a nested structure and must be accessed via `.url.default`.
+**CRITICAL**: Image URLs from Optimizely content references use a nested structure. Use `getPreviewUtils(content).src(...)` (recommended — handles preview tokens) or access `.url.default` directly.
 
 ### Correct Image Rendering Pattern
 
@@ -820,29 +939,29 @@ import { ContentProps } from '@optimizely/cms-sdk';
 import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: ContentProps<typeof HeroBlockCT>;
+  content: ContentProps<typeof HeroBlockCT>;
 };
 
-export default function HeroBlock({ opti }: Props) {
-  const { pa } = getPreviewUtils(opti);
+export default function HeroBlock({ content }: Props) {
+  const { pa, src } = getPreviewUtils(content);
 
   return (
     <div className="hero">
-      {/* ✅ CORRECT: Access nested url.default property */}
-      {opti.backgroundImage?.url?.default && (
+      {/* ✅ RECOMMENDED: src() handles preview tokens automatically */}
+      {content.backgroundImage && (
         <img
-          src={opti.backgroundImage.url.default}
-          alt={opti.title || "Hero background"}
+          src={src(content.backgroundImage)}
+          alt={content.title || "Hero background"}
           className="hero-bg"
           {...pa("backgroundImage")}
         />
       )}
 
       {/* ✅ Also works with Next.js Image component */}
-      {opti.backgroundImage?.url?.default && (
+      {content.backgroundImage && (
         <Image
-          src={opti.backgroundImage.url.default}
-          alt={opti.title || "Hero background"}
+          src={src(content.backgroundImage)!}
+          alt={content.title || "Hero background"}
           fill
           className="hero-bg"
         />
@@ -856,15 +975,19 @@ export default function HeroBlock({ opti }: Props) {
 
 ```typescript
 // ❌ WRONG: Using the reference object directly
-<img src={opti.backgroundImage} alt="..." />
+<img src={content.backgroundImage} alt="..." />
 // Result: [object Object] or invalid URL error
 
 // ❌ WRONG: Missing .url.default
-<img src={opti.backgroundImage.url} alt="..." />
+<img src={content.backgroundImage.url} alt="..." />
 // Result: Still an object, not a string
 
-// ✅ CORRECT: Full path to URL string
-<img src={opti.backgroundImage?.url?.default} alt="..." />
+// ✅ ACCEPTABLE: Full path to URL string (but no preview-token handling)
+<img src={content.backgroundImage?.url?.default} alt="..." />
+
+// ✅ BEST: src() from getPreviewUtils (handles preview tokens)
+const { src } = getPreviewUtils(content);
+<img src={src(content.backgroundImage)} alt="..." />
 ```
 
 ### URL Structure Explanation
@@ -895,16 +1018,16 @@ The runtime value structure is:
 ### Multiple Image References Example
 
 ```typescript
-export default function TestimonialBlock({ opti }: Props) {
-  const { pa } = getPreviewUtils(opti);
+export default function TestimonialBlock({ content }: Props) {
+  const { pa, src } = getPreviewUtils(content);
 
   return (
     <div>
       {/* Customer photo */}
-      {opti.customerPhoto?.url?.default && (
+      {content.customerPhoto && (
         <img
-          src={opti.customerPhoto.url.default}
-          alt={opti.customerName || "Customer"}
+          src={src(content.customerPhoto)}
+          alt={content.customerName || "Customer"}
           width={60}
           height={60}
           className="rounded-full"
@@ -913,9 +1036,9 @@ export default function TestimonialBlock({ opti }: Props) {
       )}
 
       {/* Company logo */}
-      {opti.companyLogo?.url?.default && (
+      {content.companyLogo && (
         <img
-          src={opti.companyLogo.url.default}
+          src={src(content.companyLogo)}
           alt="Company logo"
           className="logo"
           {...pa("companyLogo")}
@@ -928,8 +1051,8 @@ export default function TestimonialBlock({ opti }: Props) {
 
 ### Best Practices
 
-1. **Always use optional chaining** (`?.`) when accessing image URLs to handle undefined references
-2. **Check for url.default existence** before rendering image elements
-3. **Use preview attributes** (`{...pa("propertyName")}`) for edit mode functionality
-4. **Provide meaningful alt text** using content from your opti object when available
-5. **Standard img vs Next.js Image**: Both work, but remember Next.js Image requires configuration in `next.config.ts` for external domains
+1. **Use `src()` from `getPreviewUtils`** — handles preview tokens and resolves the URL string
+2. **Always use optional chaining** (`?.`) when reading raw `url.default` to handle undefined references
+3. **Use preview attributes** (`{...pa("propertyName")}`) for edit-mode click-to-edit
+4. **Provide meaningful alt text** — prefer `damAssets(content).getAlt(ref, fallback)` for DAM-managed images
+5. **Standard `<img>` vs Next.js `Image`**: Both work; `Image` requires hostname allowlist in `next.config.ts`

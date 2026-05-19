@@ -7,8 +7,8 @@ The `damAssets` utility provides helper functions for working with Digital Asset
 ```typescript
 import { damAssets } from '@optimizely/cms-sdk';
 
-export default function MyComponent({ opti }) {
-  const { getSrcset, getAlt, isDamImageAsset, isDamVideoAsset, isDamRawFileAsset, isDamAsset, getDamAssetType } = damAssets(opti);
+export default function MyComponent({ content }) {
+  const { getSrcset, getAlt, isDamImageAsset, isDamVideoAsset, isDamRawFileAsset, isDamAsset, getDamAssetType } = damAssets(content);
   // ...
 }
 ```
@@ -22,11 +22,11 @@ The `damAssets(content)` function takes the content object and returns helpers t
 Creates a responsive `srcset` string from image renditions. Handles deduplication and preview tokens automatically.
 
 ```typescript
-const { getSrcset } = damAssets(opti);
+const { getSrcset } = damAssets(content);
 
 <img
-  src={opti.heroImage?.item?.Url}
-  srcSet={getSrcset(opti.heroImage)}
+  src={content.heroImage?.item?.Url}
+  srcSet={getSrcset(content.heroImage)}
   sizes="(max-width: 768px) 100vw, 50vw"
 />
 ```
@@ -38,13 +38,13 @@ const { getSrcset } = damAssets(opti);
 Gets alt text for an image or video asset.
 
 ```typescript
-const { getAlt } = damAssets(opti);
+const { getAlt } = damAssets(content);
 
 // Uses AltText from asset, falls back to provided text
-<img alt={getAlt(opti.heroImage, 'Hero image')} />
+<img alt={getAlt(content.heroImage, 'Hero image')} />
 
 // Returns empty string (decorative image) if no AltText
-<img alt={getAlt(opti.decorativeIcon)} />
+<img alt={getAlt(content.decorativeIcon)} />
 ```
 
 **Parameters:**
@@ -58,15 +58,15 @@ const { getAlt } = damAssets(opti);
 Type guard: checks if a content reference is an image asset (`cmp_PublicImageAsset`). Narrows the TypeScript type.
 
 ```typescript
-const { isDamImageAsset } = damAssets(opti);
+const { isDamImageAsset } = damAssets(content);
 
-if (isDamImageAsset(opti.media)) {
-  // TypeScript knows opti.media.item is PublicImageAsset
-  const width = opti.media.item.Width;
-  const height = opti.media.item.Height;
-  const altText = opti.media.item.AltText;
-  const renditions = opti.media.item.Renditions;
-  const focalPoint = opti.media.item.FocalPoint;
+if (isDamImageAsset(content.media)) {
+  // TypeScript knows content.media.item is PublicImageAsset
+  const width = content.media.item.Width;
+  const height = content.media.item.Height;
+  const altText = content.media.item.AltText;
+  const renditions = content.media.item.Renditions;
+  const focalPoint = content.media.item.FocalPoint;
 }
 ```
 
@@ -75,12 +75,12 @@ if (isDamImageAsset(opti.media)) {
 Type guard: checks if a content reference is a video asset (`cmp_PublicVideoAsset`).
 
 ```typescript
-const { isDamVideoAsset } = damAssets(opti);
+const { isDamVideoAsset } = damAssets(content);
 
-if (isDamVideoAsset(opti.media)) {
-  // TypeScript knows opti.media.item is PublicVideoAsset
-  const videoUrl = opti.media.item.Url;
-  const altText = opti.media.item.AltText;
+if (isDamVideoAsset(content.media)) {
+  // TypeScript knows content.media.item is PublicVideoAsset
+  const videoUrl = content.media.item.Url;
+  const altText = content.media.item.AltText;
 }
 ```
 
@@ -89,12 +89,12 @@ if (isDamVideoAsset(opti.media)) {
 Type guard: checks if a content reference is a raw file asset (`cmp_PublicRawFileAsset`).
 
 ```typescript
-const { isDamRawFileAsset } = damAssets(opti);
+const { isDamRawFileAsset } = damAssets(content);
 
-if (isDamRawFileAsset(opti.media)) {
-  // TypeScript knows opti.media.item is PublicRawFileAsset
-  const fileUrl = opti.media.item.Url;
-  const mimeType = opti.media.item.MimeType;
+if (isDamRawFileAsset(content.media)) {
+  // TypeScript knows content.media.item is PublicRawFileAsset
+  const fileUrl = content.media.item.Url;
+  const mimeType = content.media.item.MimeType;
 }
 ```
 
@@ -103,9 +103,9 @@ if (isDamRawFileAsset(opti.media)) {
 Checks if a content reference is any type of DAM asset.
 
 ```typescript
-const { isDamAsset } = damAssets(opti);
+const { isDamAsset } = damAssets(content);
 
-if (!isDamAsset(opti.media)) {
+if (!isDamAsset(content.media)) {
   return <div>No media uploaded</div>;
 }
 ```
@@ -115,8 +115,8 @@ if (!isDamAsset(opti.media)) {
 Returns the asset type as a string literal.
 
 ```typescript
-const { getDamAssetType } = damAssets(opti);
-const type = getDamAssetType(opti.media);
+const { getDamAssetType } = damAssets(content);
+const type = getDamAssetType(content.media);
 // Returns: 'image' | 'video' | 'file' | 'unknown'
 ```
 
@@ -183,30 +183,30 @@ export const MediaBlockCT = contentType({
   },
 });
 
-type Props = { opti: ContentProps<typeof MediaBlockCT> };
+type Props = { content: ContentProps<typeof MediaBlockCT> };
 
-export default function MediaBlock({ opti }: Props) {
-  const { getSrcset, getAlt, getDamAssetType, isDamImageAsset } = damAssets(opti);
+export default function MediaBlock({ content }: Props) {
+  const { getSrcset, getAlt, getDamAssetType, isDamImageAsset } = damAssets(content);
 
-  switch (getDamAssetType(opti.media)) {
+  switch (getDamAssetType(content.media)) {
     case 'image':
       return (
         <figure>
           <img
-            src={opti.media?.item?.Url ?? ''}
-            srcSet={getSrcset(opti.media)}
+            src={content.media?.item?.Url ?? ''}
+            srcSet={getSrcset(content.media)}
             sizes="(max-width: 768px) 100vw, 50vw"
-            alt={getAlt(opti.media, opti.caption ?? '')}
+            alt={getAlt(content.media, content.caption ?? '')}
           />
-          {opti.caption && <figcaption>{opti.caption}</figcaption>}
+          {content.caption && <figcaption>{content.caption}</figcaption>}
         </figure>
       );
     case 'video':
-      return <video src={opti.media?.item?.Url ?? ''} controls />;
+      return <video src={content.media?.item?.Url ?? ''} controls />;
     case 'file':
       return (
-        <a href={opti.media?.item?.Url ?? ''} download>
-          {opti.media?.item?.Title || 'Download'}
+        <a href={content.media?.item?.Url ?? ''} download>
+          {content.media?.item?.Title || 'Download'}
         </a>
       );
     default:

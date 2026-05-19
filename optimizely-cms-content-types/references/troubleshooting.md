@@ -126,6 +126,51 @@ export const AccordionBlockType = contentType({
 });
 ```
 
+---
+
+### `[optimizely-cms-sdk] Fragment "X" generated N inner fragments (limit: 100)`
+
+**Warning** (v2): The SDK emits this when a single GraphQL fragment exceeds `maxFragmentThreshold` (default 100). Queries still run, but performance degrades and may eventually hit Graph's hard limits.
+
+**Cause**: A `content` or `contentReference` property — or an array of those — has no `allowedTypes` / `restrictedTypes`, so the SDK emits one inner fragment per possible content type in the registry.
+
+**Fix** (preferred): Constrain the property.
+
+```typescript
+// ❌ Causes the warning — every registered type becomes an inner fragment
+relatedContent: {
+  type: 'content',
+  displayName: 'Related Content',
+}
+
+// ✅ Limit what can be referenced
+relatedContent: {
+  type: 'content',
+  allowedTypes: [ArticlePageCT, BlogPageCT],
+  displayName: 'Related Content',
+}
+
+// ✅ Or use a base-type whitelist
+relatedContent: {
+  type: 'content',
+  allowedTypes: ['_page'],
+  displayName: 'Related Content',
+}
+```
+
+**Last resort**: raise the threshold globally:
+
+```typescript
+config({
+  apiKey: process.env.OPTIMIZELY_GRAPH_SINGLE_KEY,
+  maxFragmentThreshold: 200,
+});
+```
+
+This silences the warning but doesn't fix the underlying perf cost. Narrow the types first.
+
+---
+
 ## TypeScript Build Errors
 
 ### Module Import Errors
@@ -271,13 +316,13 @@ export const MyDisplayTemplate = displayTemplate({
 
 **❌ Wrong:**
 ```typescript
-<RichText content={opti.content?.json} className="prose" />
+<RichText content={content.content?.json} className="prose" />
 ```
 
 **✅ Correct - Wrap in a div:**
 ```typescript
 <div className="prose prose-lg">
-  <RichText content={opti.content?.json} />
+  <RichText content={content.content?.json} />
 </div>
 ```
 
@@ -288,21 +333,21 @@ When using Tailwind's prose plugin, be careful with color modifiers:
 **❌ Poor contrast in light mode:**
 ```typescript
 <div className="prose prose-invert prose-lg">
-  <RichText content={opti.content?.json} />
+  <RichText content={content.content?.json} />
 </div>
 ```
 
 **✅ Good for light mode:**
 ```typescript
 <div className="prose prose-lg">
-  <RichText content={opti.content?.json} />
+  <RichText content={content.content?.json} />
 </div>
 ```
 
 **✅ Adaptive (dark mode support):**
 ```typescript
 <div className="prose prose-lg dark:prose-invert">
-  <RichText content={opti.content?.json} />
+  <RichText content={content.content?.json} />
 </div>
 ```
 
@@ -348,9 +393,9 @@ allowMultiple: {
 }
 
 // 2. Handle default in component code
-const allowMultiple = opti.allowMultiple ?? false;
+const allowMultiple = content.allowMultiple ?? false;
 // or
-if (opti.allowMultiple === true) {
+if (content.allowMultiple === true) {
   // ...
 }
 ```
@@ -378,18 +423,18 @@ URL properties return `InferredUrl` objects, not strings. Access the string valu
 
 **❌ Wrong:**
 ```typescript
-<Link href={opti.url}>...</Link>
+<Link href={content.url}>...</Link>
 // Error: Type 'InferredUrl' is not assignable to type 'Url'
 ```
 
 **✅ Correct:**
 ```typescript
-<Link href={opti.url?.default || "#"}>...</Link>
+<Link href={content.url?.default || "#"}>...</Link>
 ```
 
 **For video/iframe src:**
 ```typescript
-<iframe src={opti.embedUrl?.default || ""} />
+<iframe src={content.embedUrl?.default || ""} />
 ```
 
 ### Boolean Types
@@ -398,13 +443,13 @@ Boolean properties can be `true | false | null`, not just `true | false | undefi
 
 **❌ Wrong:**
 ```typescript
-<video autoPlay={opti.autoplay} />
+<video autoPlay={content.autoplay} />
 // Error: Type 'boolean | null' is not assignable to type 'boolean | undefined'
 ```
 
 **✅ Correct:**
 ```typescript
-<video autoPlay={opti.autoplay === true} />
+<video autoPlay={content.autoplay === true} />
 ```
 
 ### JSON Property Arrays
@@ -431,9 +476,9 @@ contactInfo: {
 
 **3. Use with type guards and casting:**
 ```typescript
-{opti.contactInfo && Array.isArray(opti.contactInfo) && opti.contactInfo.length > 0 && (
+{content.contactInfo && Array.isArray(content.contactInfo) && content.contactInfo.length > 0 && (
   <div>
-    {(opti.contactInfo as ContactInfo[]).map((info, i) => (
+    {(content.contactInfo as ContactInfo[]).map((info, i) => (
       <div key={i}>
         <span>{info.label}</span>
         <span>{info.value}</span>
@@ -448,7 +493,7 @@ contactInfo: {
 When mapping over content arrays, the items may need explicit type casting:
 
 ```typescript
-{opti.items.map((item, index) => {
+{content.items.map((item, index) => {
   // Cast to the expected type
   const accordionItem = item as unknown as ContentProps<typeof AccordionItemType>;
 
@@ -480,7 +525,7 @@ export const AccordionItemType = contentType({
 });
 
 // Data-only component (not rendered directly)
-export default function AccordionItem({ opti }: Props) {
+export default function AccordionItem({ content }: Props) {
   return null;
 }
 ```
@@ -527,14 +572,14 @@ initReactComponentRegistry({
 
 | Scenario | Solution |
 |----------|----------|
-| URL for Link href | `opti.url?.default \|\| "#"` |
-| URL for iframe src | `opti.embedUrl?.default \|\| ""` |
-| Boolean for HTML attrs | `opti.autoplay === true` |
-| JSON array | `Array.isArray(opti.items) && (opti.items as MyType[]).map(...)` |
+| URL for Link href | `content.url?.default \|\| "#"` |
+| URL for iframe src | `content.embedUrl?.default \|\| ""` |
+| Boolean for HTML attrs | `content.autoplay === true` |
+| JSON array | `Array.isArray(content.items) && (content.items as MyType[]).map(...)` |
 | Content array items | `item as unknown as ContentProps<typeof ItemType>` |
 | Numeric types | Use `"integer"` or `"float"`, NOT `"number"` |
 | Default values | Handle in component, NOT in schema |
-| Null checks | `opti.value !== null && opti.value !== undefined` |
+| Null checks | `content.value !== null && content.value !== undefined` |
 
 ## Property Type Cheat Sheet
 
@@ -648,7 +693,7 @@ import {
 } from '@optimizely/cms-sdk/react/server';
 
 type Props = {
-  opti: ContentProps<typeof BlankExperienceContentType>;
+  content: ContentProps<typeof BlankExperienceContentType>;
 };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
@@ -656,11 +701,11 @@ function ComponentWrapper({ children, node }: ComponentContainerProps) {
   return <div className="mb-8" {...pa(node)}>{children}</div>;
 }
 
-export default function BlankExperience({ opti }: Props) {
+export default function BlankExperience({ content }: Props) {
   return (
     <main className="blank-experience">
       <OptimizelyComposition
-        nodes={opti.composition.nodes ?? []}
+        nodes={content.composition.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
     </main>
@@ -678,15 +723,15 @@ import {
 } from '@optimizely/cms-sdk/react/server';
 
 type BlankSectionProps = {
-  opti: ContentProps<typeof BlankSectionContentType>;
+  content: ContentProps<typeof BlankSectionContentType>;
 };
 
-export default function BlankSection({ opti }: BlankSectionProps) {
-  const { pa } = getPreviewUtils(opti);
+export default function BlankSection({ content }: BlankSectionProps) {
+  const { pa } = getPreviewUtils(content);
   return (
-    <section className="vb:grid relative w-full py-12 px-4" {...pa(opti)}>
+    <section className="vb:grid relative w-full py-12 px-4" {...pa(content)}>
       <div className="max-w-7xl mx-auto w-full">
-        <OptimizelyGridSection nodes={opti.nodes} row={Row} column={Column} />
+        <OptimizelyGridSection nodes={content.nodes} row={Row} column={Column} />
       </div>
     </section>
   );
@@ -746,7 +791,7 @@ export default async function PreviewPage({ searchParams }: Props) {
         strategy="afterInteractive"
       />
       <PreviewComponent />
-      <OptimizelyComponent opti={response} />
+      <OptimizelyComponent content={response} />
     </div>
   );
 }
@@ -853,13 +898,13 @@ websiteUrl: InferredUrl | null
 ctaLink: { url: InferredUrl; text: string | null; title: string | null; target: string | null } | null
 
 // Access the actual URL string from InferredUrl
-const url = opti.websiteUrl?.default || "";
+const url = content.websiteUrl?.default || "";
 
 // Access image URL from contentReference
-const imageUrl = opti.featuredImage?.url?.default || "";
+const imageUrl = content.featuredImage?.url?.default || "";
 // Or access the DAM asset directly
-const damUrl = opti.featuredImage?.item?.Url || "";
+const damUrl = content.featuredImage?.item?.Url || "";
 
 // Access link href
-const linkHref = opti.ctaLink?.url?.default || "#";
+const linkHref = content.ctaLink?.url?.default || "#";
 ```
