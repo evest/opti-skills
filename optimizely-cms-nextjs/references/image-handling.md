@@ -1,6 +1,6 @@
 # Image Handling
 
-The starter ships a custom Cloudinary loader plus `next/image` `remotePatterns` covering the Optimizely DAM hosts.
+The Optimizely CDN serves transform-ready URLs; Next.js's default image loader handles them fine. No custom loader needed.
 
 ## `next.config.ts` image config
 
@@ -8,143 +8,154 @@ The starter ships a custom Cloudinary loader plus `next/image` `remotePatterns` 
 images: {
   remotePatterns: [
     { protocol: 'https', hostname: '*.cms.optimizely.com' },
-    { protocol: 'https', hostname: '*.cmstest.optimizely.com' },
-    { protocol: 'https', hostname: '*.optimizely.com', port: '', pathname: '/**' },
-    { protocol: 'https', hostname: 'res.cloudinary.com' },
+    { protocol: 'https', hostname: 'cdn.optimizely.com' },
+    { protocol: 'https', hostname: '*.cmp.optimizely.com' },
   ],
-  loader: 'custom',
-  loaderFile: './lib/image/loader.ts',
-}
+},
 ```
 
-## Custom loader
+What each hostname covers:
+- `*.cms.optimizely.com` — CMS instance image URLs (uploaded media)
+- `cdn.optimizely.com` — Optimizely's shared CDN
+- `*.cmp.optimizely.com` — Content Marketing Platform DAM hosts (PublicImageAsset, PublicVideoAsset, PublicRawFileAsset)
 
-```ts
-// lib/image/loader.ts
-'use client'
-
-const CLOUDINARY_REGEX =
-  /^.+\.cloudinary\.com\/([^/]+)\/(?:(image|video|raw)\/)?(?:(upload|fetch|private|authenticated|sprite|facebook|twitter|youtube|vimeo)\/)?(?:(?:[^/]+\/[^,/]+,?)*\/)?(?:v(\d+|\w{1,2})\/)?([^.^\s]+)(?:\.(.+))?$/
-
-export const extractCloudinaryPublicID = (link: string): string => {
-  if (!link) return ''
-  const parts = CLOUDINARY_REGEX.exec(link)
-  if (parts && parts.length > 2) {
-    const path = parts[parts.length - 2]
-    const extension = parts[parts.length - 1]
-    return `${path}${extension ? '.' + extension : ''}`
-  }
-  return link
-}
-
-const extractCloudName = (link: string): string => {
-  const parts = CLOUDINARY_REGEX.exec(link)
-  return parts && parts.length > 2 && parts[1] ? parts[1] : link
-}
-
-const getParams = (path: string, width: number, quality?: number) => {
-  const params = path.toLowerCase().endsWith('.svg')
-    ? []
-    : [`f_auto`, `c_limit`, `w_${width || 'auto'}`, `q_${quality || 'auto'}`]
-  return params.length ? `/${params.join(',')}/` : '/'
-}
-
-const paramFormats = ['f_', 'c_']
-
-export default function cloudinaryLoader({
-  src, width, quality,
-}: { src: string; width: number; quality?: number }) {
-  if (src.startsWith('https://res.cloudinary.com')) {
-    if (paramFormats.some((f) => src.includes(f))) return src   // already optimized
-    const publicId = extractCloudinaryPublicID(src)
-    if (!publicId) return src
-    const cloudName = extractCloudName(src)
-    const params = getParams(publicId, width, quality)
-    return `https://res.cloudinary.com/${cloudName}/image/upload${params}${publicId}`
-  }
-  return src
-}
-```
-
-## What this does
-
-For a plain Cloudinary URL like `https://res.cloudinary.com/demo/image/upload/sample.jpg`:
-
-1. Detects it starts with `res.cloudinary.com`.
-2. Extracts the cloud name (`demo`) and public ID (`sample.jpg`).
-3. Generates transformation params:
-   - `f_auto` — auto format (WebP/AVIF where supported)
-   - `c_limit` — don't upscale
-   - `w_<width>` — width picked by Next.js's `sizes` logic
-   - `q_auto` (or `q_<quality>`) — auto quality
-4. Returns `https://res.cloudinary.com/demo/image/upload/f_auto,c_limit,w_800,q_auto/sample.jpg`.
-
-For SVGs (detected by `.svg` suffix), no transformation params are added — optimization would damage vector images.
-
-For Cloudinary URLs that already contain transformation params (detected by `f_` or `c_` substring), the loader returns the URL unchanged. Avoids double-transforming editor-managed URLs.
-
-For any non-Cloudinary URL (including `*.cms.optimizely.com`), the loader returns the src unchanged — those hosts serve their own optimized images.
-
-## `'use client'` directive
-
-The loader file is marked `'use client'` because Next.js's custom loader executes in the browser (the rendered `<img src>` values are built at request time on the server, but resolved client-side for responsive `srcSet` generation). Do NOT add server-only imports (`fs`, `cookies`, etc.) — they'll break the bundle.
+Without a `loader` / `loaderFile` setting, Next.js uses its built-in image optimizer — works correctly against Optimizely-hosted images.
 
 ## Using `next/image` with CMS images
 
+The pattern:
 ```tsx
-import Image from 'next/image'
-
-// In a block component:
-<Image
-  src={imageSrc}                // CMS-provided URL (Cloudinary or Optimizely DAM)
-  alt={altText ?? ''}
-  fill                          // or width/height
-  className="object-cover"
-/>
-```
-
-The loader runs per image, per rendered width. Next.js generates the `srcSet` covering its default breakpoints. For very precise control, pass `sizes` to narrow which widths get generated.
-
-## DAM assets from the SDK
-
-For Optimizely DAM assets, use the `damAssets()` helpers (see content-types skill):
-
-```tsx
-import { damAssets } from '@optimizely/cms-sdk'
+import Image from 'next/image';
+import { damAssets } from '@optimizely/cms-sdk';
+import { getPreviewUtils } from '@optimizely/cms-sdk/react/server';
 
 export default function HeroBlock({ content }: Props) {
-  const { getSrcset, getAlt, isDamImageAsset } = damAssets(content)
+  const { src } = getPreviewUtils(content);
+  const { getAlt } = damAssets(content);
+  const imageUrl = src(content.backgroundImage);
 
-  if (content.backgroundImage && isDamImageAsset(content.backgroundImage)) {
-    return (
-      <img
-        src={content.backgroundImage.item.Url}
-        srcSet={getSrcset(content.backgroundImage)}
-        alt={getAlt(content.backgroundImage, 'Hero')}
-      />
-    )
-  }
-  return null
+  if (!imageUrl) return null;
+
+  return (
+    <Image
+      src={imageUrl}
+      alt={getAlt(content.backgroundImage, '')}
+      fill
+      className="object-cover"
+      sizes="100vw"
+      priority
+    />
+  );
 }
 ```
 
-`damAssets()` produces SDK-native `srcSet` strings keyed on DAM rendition widths. Use it when the content property is a `contentReference` to a DAM asset; use the Next.js Image + custom loader combo for plain Cloudinary URL strings.
+Three SDK helpers do most of the work:
+- `getPreviewUtils(content).src(reference)` — resolves the URL and appends preview tokens in edit mode
+- `damAssets(content).getAlt(reference, fallback)` — reads `AltText` from the DAM asset with fallback
+- `damAssets(content).getSrcset(reference)` — generates a `srcSet` from DAM renditions (use this in plain `<img>` for responsive renditions when Next.js's auto srcSet isn't enough)
 
-## Adding a new CDN host
+Detailed DAM helper reference lives in the `optimizely-cms-content-types` skill (`references/dam-assets.md`).
 
-1. Add the hostname to `remotePatterns` in `next.config.ts`.
-2. If the CDN needs custom transformation (like Cloudinary), extend `loader.ts`:
+## Why no custom loader
+
+This project deliberately does NOT use a custom Next.js image loader. Reasons:
+
+1. **Optimizely-hosted images are already CDN-optimized.** The CDN URL format includes query-string transforms; Next.js's default optimizer correctly handles the responsive `sizes` story by passing through width hints.
+2. **The DAM helpers (`getSrcset`) handle responsive rendering when you want SDK-aware behaviour.** Falling back to plain `<img>` with a manual `srcSet` is the escape hatch.
+3. **No Cloudinary or other third-party CDN in the asset pipeline.** Adding a custom loader would be premature complexity.
+
+If you add a third-party CDN (e.g. Cloudinary, Imgix) later, you can:
+- Add the hostname to `remotePatterns` and let Next.js's default optimizer handle it
+- Or write a custom loader at `src/lib/image/loader.ts` and set `images.loader: 'custom'` + `images.loaderFile`. The loader runs client-side (`'use client'`); do not add server-only imports.
+
+Skeleton for a future Cloudinary loader:
+```ts
+// src/lib/image/loader.ts
+'use client';
+
+export default function imageLoader({ src, width, quality }: {
+  src: string; width: number; quality?: number;
+}) {
+  if (src.startsWith('https://res.cloudinary.com')) {
+    // transform into f_auto,c_limit,w_<width>,q_<quality> form
+  }
+  return src;
+}
+```
+
+Don't add this prematurely. Add when the asset source requires it.
+
+## SVG handling
+
+`next/image` rejects SVGs by default (security: SVG can contain scripts). Two options:
+
+1. Use plain `<img>` for SVG assets:
+   ```tsx
+   <img src={src(content.icon)} alt={getAlt(content.icon, '')} />
+   ```
+2. Enable `dangerouslyAllowSVG` in `next.config.ts` (only if you trust the asset source — Optimizely DAM is generally safe):
    ```ts
-   if (src.startsWith('https://my-cdn.example.com')) {
-     // ... build transformed URL
-     return transformed
+   images: {
+     dangerouslyAllowSVG: true,
+     contentSecurityPolicy: "default-src 'self'; script-src 'none';",
+     // ...
    }
    ```
-3. Keep the "return src unchanged" fallback at the bottom — any unhandled host passes through.
+
+This repo doesn't enable `dangerouslyAllowSVG` — SVG assets render via plain `<img>` from the relevant component.
+
+## DAM assets in detail
+
+For Optimizely DAM assets (`cmp_PublicImageAsset`, etc.), the SDK exposes type guards and helpers via `damAssets(content)`:
+
+```tsx
+import { damAssets } from '@optimizely/cms-sdk';
+
+export default function MediaBlock({ content }: Props) {
+  const { isDamImageAsset, isDamVideoAsset, getSrcset, getAlt } = damAssets(content);
+
+  if (isDamImageAsset(content.media)) {
+    return (
+      <img
+        src={content.media.item.Url}
+        srcSet={getSrcset(content.media)}
+        alt={getAlt(content.media, 'Media')}
+      />
+    );
+  }
+
+  if (isDamVideoAsset(content.media)) {
+    return <video src={content.media.item.Url} controls />;
+  }
+
+  return null;
+}
+```
+
+`getSrcset` produces an SDK-native srcSet string keyed on DAM rendition widths. Use it instead of relying on Next.js to generate variants when:
+- The DAM has pre-cut renditions you want to use exactly
+- You need specific widths that don't match Next.js's default breakpoints
+- You're not using `next/image` (e.g. inside RichText)
+
+Full DAM API in the content-types skill's `references/dam-assets.md`.
+
+## Adding a new image hostname
+
+1. Add the hostname pattern to `remotePatterns` in `next.config.ts`:
+   ```ts
+   { protocol: 'https', hostname: 'new-cdn.example.com' },
+   ```
+2. If the CDN serves transform URLs you want Next.js to respect, no further action — the default optimizer passes them through.
+3. If the CDN requires URL transformation (params for `w_/q_`/etc.), write a custom loader (see "Why no custom loader" above).
+4. Restart the dev server — `next.config.ts` changes don't hot-reload.
 
 ## Debugging
 
-- **Images don't load** → check browser console for `remotePatterns` violation; add the hostname.
-- **Images are blurry** → the loader might be returning a URL with no params; verify the regex matches your Cloudinary URL shape.
-- **Editor-provided Cloudinary URLs render twice-optimized** → check the `paramFormats` short-circuit; editor URLs often already contain `f_auto`.
-- **SVGs are being compressed into raster** → ensure the `.svg` extension check in `getParams` works for your filename (lowercase compare).
+| Symptom | Cause | Fix |
+|---|---|---|
+| `next/image` throws "hostname not configured" | Hostname missing from `remotePatterns` | Add it |
+| Images load but are full-resolution everywhere | `sizes` prop missing on `<Image>` | Add `sizes` so Next.js knows which widths to generate |
+| Draft images don't render in preview | Component using `content.image.url.default` directly | Switch to `src(content.image)` from `getPreviewUtils` |
+| SVG asset rejected | `next/image` blocks SVG by default | Use plain `<img>` or enable `dangerouslyAllowSVG` cautiously |
+| DAM video doesn't play | Browser MIME check failed | Inspect `content.media.item.MimeType` — usually `video/mp4`; check `<source>` tag if used |
+| `getSrcset` returns undefined | No renditions on the asset | DAM asset hasn't been processed yet; falls back to single Url |

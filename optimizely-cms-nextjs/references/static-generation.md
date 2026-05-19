@@ -1,167 +1,214 @@
 # Static Generation + ISR
 
-How the catch-all route pre-renders every CMS page at build time, and how the build gracefully degrades to on-demand ISR when the CMS is unreachable.
+The canonical pattern in this project is **deliberately not to pre-render real pages at build**. `generateStaticParams` returns a placeholder per locale; real pages fill into the shared Redis cache on first request. This page explains why.
 
-## Pieces
+## TL;DR
 
-- `generateStaticParams()` in `app/[locale]/[...slug]/page.tsx` — returns the list of `{ slug }` objects to pre-render.
-- `getAllPagesPaths()` in `lib/optimizely/all-pages.ts` — queries Graph for every `CMSPage` and `SEOExperience` path.
-- `mapPathWithoutLocale()` in `lib/optimizely/language.ts` — strips the leading `/en/` (or other locale) from a Graph-returned path to produce the raw slug array.
+| Concern | Decision |
+|---|---|
+| Pre-render every CMS page at `next build` | **No** |
+| `generateStaticParams` for `[[...slug]]` | Returns one placeholder slug per locale |
+| `generateStaticParams` for the locale layout | Returns `routing.locales` (cheap, no Graph) |
+| First request per URL after deploy | Pays Graph latency for TTFB; fills shared cache |
+| Subsequent requests across all replicas | Cache HIT via shared Redis handler |
+| Cache invalidation on publish | `/hooks/graph` webhook → `revalidatePath(path)` |
+| Sitemap freshness | `cacheLife('hours')` + tag invalidation by webhook |
 
-## `getAllPagesPaths()`
-
-```ts
-// lib/optimizely/all-pages.ts
-import { GraphClient } from '@optimizely/cms-sdk'
-import { mapPathWithoutLocale } from './language'
-
-const ALL_PAGES_QUERY = `
-  query AllPages($pageType: [String]) {
-    _Content(where: { _metadata: { types: { in: $pageType } } }) {
-      items {
-        _metadata {
-          displayName
-          url { base hierarchical default type }
-        }
-      }
-    }
-  }
-`
-
-export const getAllPagesPaths = async () => {
-  try {
-    const client = new GraphClient(process.env.OPTIMIZELY_GRAPH_SINGLE_KEY!, {
-      graphUrl: process.env.OPTIMIZELY_GRAPH_URL,
-    })
-
-    const pageTypes = ['CMSPage', 'SEOExperience']
-    const pathsResp = await client.request(ALL_PAGES_QUERY, {
-      pageType: pageTypes,
-    } as any)
-
-    const paths = (pathsResp._Content?.items as ContentItem[]) ?? []
-
-    const filterPaths = paths.filter(
-      (p) => p && p._metadata?.url?.default !== null,
-    )
-
-    const uniqueSlugs = new Set<string[]>()
-    filterPaths.forEach((p) => {
-      uniqueSlugs.add(mapPathWithoutLocale(p._metadata.url.default))
-    })
-
-    return Array.from(uniqueSlugs).map((slugArray) => ({ slug: slugArray }))
-  } catch (e) {
-    console.error('Error generating static params:', e)
-    return []    // empty = ISR fallback
-  }
-}
-```
-
-Shape returned: `[{ slug: ['about'] }, { slug: ['blog', 'post-1'] }, ...]` — matches the `[...slug]` param's expected type (array of segments).
-
-## Why filter by content type
-
-Only `CMSPage` and `SEOExperience` pages have user-visible URLs. Everything else (`Header`, `Footer`, blocks, experiences-as-data) is fetched by path elsewhere and shouldn't be prerendered as its own route.
-
-If you add a new page-level content type (e.g. `BlogArticlePage`), add its key to `pageTypes` — otherwise those pages will only render via ISR on first request, not at build time.
-
-## `mapPathWithoutLocale`
+## The placeholder pattern
 
 ```ts
-// lib/optimizely/language.ts
-export const DEFAULT_LOCALE = 'en'
-export const LOCALES = ['en', 'pl', 'sv']
+// src/lib/optimizely/all-pages.ts
+import { routing } from '@/i18n/routing';
 
-export const mapPathWithoutLocale = (path: string): string[] => {
-  const parts = path.split('/').filter(Boolean)
-  if (LOCALES.includes(parts[0] ?? '')) {
-    parts.shift()
-  }
-  return parts
+export const PLACEHOLDER_SLUG_SEGMENT = '__no-cms-pages-at-build__';
+
+type LocaleSlug = { locale: string; slug?: string[] };
+
+const PLACEHOLDER: LocaleSlug[] = routing.locales.map((locale) => ({
+  locale,
+  slug: [PLACEHOLDER_SLUG_SEGMENT],
+}));
+
+export function getAllPagesPaths(): LocaleSlug[] {
+  return PLACEHOLDER;
 }
 ```
 
-Converts `/en/blog/post-1/` → `['blog', 'post-1']`. Handles paths with or without leading locale, and collapses duplicate entries across locales via the `Set` in `getAllPagesPaths`.
+```ts
+// src/lib/optimizely/get-page.ts (relevant fragment)
+export async function getPageContent(slug: string[]) {
+  'use cache';
+  cacheLife('max');
+  cacheTag(getPageTag(slug));
 
-## `generateStaticParams` wiring
-
-```tsx
-// app/[locale]/[...slug]/page.tsx
-export async function generateStaticParams() {
-  try {
-    return await getAllPagesPaths()
-  } catch (e) {
-    console.error('Error generating static params:', e)
-    return []
+  if (slug.includes(PLACEHOLDER_SLUG_SEGMENT)) {
+    return null;          // short-circuit — never hits Graph
   }
+  // ... normal fetch path
 }
 ```
 
-Even though `getAllPagesPaths` already has internal try/catch, the wrapper here belts-and-braces against any unexpected throw during the build phase. **The build must never fail because the CMS is unreachable.** Returning `[]` means: "prerender nothing; rely on ISR to render each route on its first request."
+`cacheComponents` requires `generateStaticParams` to return at least one entry. The placeholder satisfies that rule cheaply — no Graph call, no chance of build-time failure.
 
-For the root `[locale]/page.tsx` (homepage), the locale layout above provides `generateStaticParams` returning `LOCALES.map((locale) => ({ locale }))`. No per-slug logic needed at the homepage level.
+## Why we don't pre-render real pages
 
-## Locale layout's generateStaticParams
+Three reasons, all observed in production:
+
+1. **DXP build container has unreliable outbound connectivity to Optimizely Graph.** We've seen `HeadersTimeoutError` and 50s `'use cache'` fill timeouts on individual real pages during Test2 builds.
+
+2. **A timed-out Graph fetch inside `'use cache'` fails the build, and is unrecoverable.** The alternative — recording a null result and 404'ing the page — silently breaks real published pages until the next deploy or webhook event. Either way, build success becomes coupled to Graph availability, which is the opposite of what static generation should buy us.
+
+3. **Pages are perfectly cacheable at runtime via the shared Redis cache handler.** First request per URL pays Graph latency for TTFB; every subsequent request across all replicas is a cache HIT. The webhook invalidates per-page on publish.
+
+Net effect: **build never depends on Graph**. Cache fills happen on first request per URL after deploy. The TTFB penalty for the first hit per URL is acceptable because the shared cache makes it amortise over every subsequent hit, on every replica, until the next publish.
+
+## Locale layout's `generateStaticParams`
+
+The locale layout's `generateStaticParams` is cheap — pure local data:
 
 ```tsx
-// app/[locale]/layout.tsx
+// src/app/[locale]/layout.tsx
+import { routing } from '@/i18n/routing';
+
 export function generateStaticParams() {
-  try {
-    return LOCALES.map((locale) => ({ locale }))
-  } catch {
-    return []
-  }
+  return routing.locales.map((locale) => ({ locale }));
 }
 ```
 
-This is what tells Next.js to pre-render a tree for each locale. Without it, only the default locale would prerender.
+This tells Next.js to pre-render the layout shell for each locale at build. Header, footer, locale-aware translations — all bake in. The placeholder catch-all under it then prevents any per-slug prerender.
+
+## Catch-all uses optional brackets
+
+```
+src/app/[locale]/[[...slug]]/page.tsx
+              ^^^^^^^^^^^
+              double brackets = optional catch-all
+```
+
+Optional catch-all (double brackets) matches both `/no/` (no slug → `slug` is `undefined`) and `/no/about/` (slug is `['about']`). Single-bracket `[...slug]` would NOT match the locale root — `/no/` would fall through to the locale layout with no page match.
+
+```ts
+// In the page
+function fullSlug(locale: string, slug?: string[]): string[] {
+  return [locale, ...(slug ?? [])];
+}
+```
+
+So `getPageContent(['no'])` fetches `/no/` (the locale root) and `getPageContent(['no', 'about'])` fetches `/no/about/`. Both go through the same fetcher, same cache, same tag scheme.
 
 ## Behaviour at build time
 
 ```
 next build
-├── Root layout evaluated → init.ts side-effect runs registrations
-├── [locale]/layout generateStaticParams → [{locale:'en'},{locale:'pl'},{locale:'sv'}]
-├── [locale]/[...slug] generateStaticParams → [{slug:['about']}, {slug:['blog','post-1']}, ...]
-├── For each (locale, slug) pair:
-│     Run page.tsx → calls getPageContent → fills cacheLife('max') cache entry → emits HTML
-└── Bundle static HTML + cache state into .next/
+├── Root layout evaluated → src/optimizely.ts side-effect runs config() + 3 registries
+├── [locale]/layout generateStaticParams → [{locale:'en'},{locale:'no'},{locale:'sv'},{locale:'da'}]
+├── [locale]/[[...slug]] generateStaticParams → [
+│     {locale:'en', slug:['__no-cms-pages-at-build__']},
+│     {locale:'no', slug:['__no-cms-pages-at-build__']},
+│     ...
+│   ]
+├── For each placeholder pair, render → getPageContent short-circuits → returns null
+│   → notFound() commits 404 → 404 response prerendered for the placeholder URL
+└── Bundle into .next/
 ```
 
-At runtime, those cache entries survive until invalidated. A `revalidatePath(urlWithLocale)` from the webhook blows the cache entry; the next request re-runs `getPageContent` and re-caches.
+The placeholder URLs are never reachable by users (no editor would publish a page at `/no/__no-cms-pages-at-build__/`). They exist solely to satisfy the framework's "≥1 entry" rule.
 
-## Behaviour when CMS is down during build
+## Behaviour at runtime
 
-1. `generateStaticParams` returns `[]`
-2. Build succeeds with zero prerendered pages for the `[...slug]` route
-3. At runtime, each request first hits the catch-all, runs `getPageContent`, populates cache, serves HTML
-4. Subsequent requests hit the cached entry
+First request to `/no/about/`:
+1. No prerendered HTML matches → on-demand render
+2. `getPageContent(['no', 'about'])` — cache miss → calls Graph → fills Redis cache entry tagged `opti-page:no/about`
+3. HTML rendered, returned
 
-Net effect: the app works, but the first hit for each page is slower than if it had been prerendered.
+Second request to `/no/about/` (any replica):
+1. Cache HIT in Redis → `getPageContent` resolves to cached result without Graph call
+2. HTML rendered, returned
+
+Editor publishes `/no/about/`:
+1. CMS webhook POSTs `/hooks/graph` with the docId
+2. Webhook resolves docId → URL → calls `revalidatePath('/no/about')` and `revalidateTag(getPageTag([...]), 'max')`
+3. Redis entries for that page deleted
+4. Next request re-fills the cache
+
+Editor publishes `/no/blog/post-1/`:
+1. Same flow + ancestor-prefix invalidation of `getArticlesUnderTag('/no/', 'no')` and `getArticlesUnderTag('/no/blog/', 'no')` so any article-listing block on parent pages re-fetches
+
+## Sitemap generation
+
+The sitemap is the one place that walks every CMS page at runtime (not build):
+
+```ts
+// src/lib/optimizely/all-content-paths.ts
+export async function getAllContentPaths() {
+  'use cache';
+  cacheLife('hours');
+  cacheTag(CACHE_KEYS.PATHS);
+  // ... Graph query ...
+}
+
+// src/app/sitemap.ts
+export default async function sitemap() {
+  const paths = await getAllContentPaths();
+  return /* ... shape ... */;
+}
+```
+
+`'hours'` cacheLife is the belt; webhook invalidation of `CACHE_KEYS.PATHS` is the braces. Either keeps the sitemap reasonably fresh.
+
+## When to switch to real prerender
+
+Pre-rendering real pages becomes attractive when:
+- Graph connectivity from the build container is reliable (true on Vercel, often not on DXP)
+- You want SEO crawlers to see the prerendered HTML faster than the first-request fill
+- The cache cold-start penalty across all routes matters to your TTI metrics
+
+If you switch, accept the trade-off:
+- Build fails when Graph is unreachable
+- A build-time `'use cache'` rejection is essentially unrecoverable without a deploy retry
+
+Implementation sketch (DO NOT apply without reading the trade-off above):
+
+```ts
+// Replace src/lib/optimizely/all-pages.ts with:
+export async function getAllPagesPaths(): Promise<LocaleSlug[]> {
+  try {
+    const client = getClient();
+    // Walk all _Content with usable URLs; group by locale; return slug arrays
+    // matching the [[...slug]] route's expected shape.
+    // ... see git history / uryga-nextjs for a reference implementation ...
+  } catch (e) {
+    console.error('[all-pages] graph query failed:', e);
+    return /* still return placeholder per-locale so build doesn't break */;
+  }
+}
+```
+
+The fallback to placeholder on error preserves "build never fails" while attempting real prerender on the happy path. This is the conservative migration.
 
 ## ISR revalidation on publish
 
-When the CMS webhook fires (see `revalidation-webhook.md`):
-- For regular pages → `revalidatePath(urlWithLocale)` → next request re-renders that page
-- For header/footer → `revalidateTag(tag, 'max')` → every page re-renders its header/footer on next request
+When `/hooks/graph` fires for a CMS publish:
+- **Page URL** → `revalidatePath(path)` → exact-route cache entry blown
+- **Page parents** → `revalidateTag(getArticlesUnderTag(parent, locale), 'max')` for each ancestor → any listing block re-fetches
+- **Sitemap** → `revalidateTag(CACHE_KEYS.PATHS, 'hours')` → sitemap re-fills next request
 
-`revalidatePath` does not immediately regenerate the page — it marks the cache entry stale. The next in-flight request triggers the re-render.
-
-## Adding new page types to static generation
-
-When you add a new `_page` content type that should be prerendered:
-
-1. Register the content type in `lib/optimizely/init.ts` (as always).
-2. Add the key to `pageTypes` in `getAllPagesPaths`:
-   ```ts
-   const pageTypes = ['CMSPage', 'SEOExperience', 'BlogArticlePage']
-   ```
-3. If the new type lives under a different URL prefix and you want deep links to work at root level, ensure its URL generator in CMS is configured accordingly.
+`revalidatePath` and `revalidateTag` mark cache entries stale but don't prefetch. The next in-flight request triggers the re-render.
 
 ## Debugging "my page renders but isn't prerendered"
 
-- Check `npm run build` output — the route tree shows which paths got static-generated. Paths not in the output are ISR-only.
-- Check `getAllPagesPaths` returns your path — temporarily log the result.
-- Check `mapPathWithoutLocale` isn't stripping something unexpectedly.
-- Check the content type's `_metadata.url.default` isn't null in the Graph response (which would filter it out).
+In this project, **no page is prerendered by design** — every page is runtime-cached. If you expected prerender and didn't get it, the placeholder pattern is the cause.
+
+If you actually need prerender for one specific page (e.g. a marketing landing page that's heavily promoted), the cleanest path is:
+
+1. Don't replace `getAllPagesPaths` wholesale.
+2. Add a dedicated route file with its own `generateStaticParams` returning that one slug.
+3. Or accept the runtime cache fill — the first request after deploy is typically < 1s and every subsequent request is < 50ms.
+
+## Debugging "the cache isn't sharing across replicas"
+
+If `revalidateTag` works locally but not in DXP:
+1. Check `cache-handler.mjs` is referenced in `next.config.ts`'s `cacheHandler`.
+2. Check `cacheMaxMemorySize: 0` — without this, Next.js keeps an in-process LRU per replica that the handler can't invalidate.
+3. Check DXP logs for `[cache] Redis cluster connected` — if you see `Redis unavailable, falling back to in-memory`, replicas are running their own caches and `revalidateTag` only invalidates the one that received the webhook.
+4. Check `REDIS_URL`, `AZURE_CLIENT_ID`, `OPTIMIZELY_DXP_DEPLOYMENT_ID` are present in DXP env.

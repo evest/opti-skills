@@ -1,100 +1,131 @@
-# Registration (`lib/optimizely/init.ts`)
+# Registration (`src/optimizely.ts`)
 
-The single entry point that tells the SDK about every content type, every React component, and every display template in your app.
+The single entry point that tells the SDK about every content type, every React component, every display template — and configures the Graph client.
 
 ## Anatomy
 
 ```ts
-// lib/optimizely/init.ts
+// src/optimizely.ts
 import {
-  BlankExperienceContentType,
+  config,
   initContentTypeRegistry,
   initDisplayTemplateRegistry,
-} from '@optimizely/cms-sdk'
-import { initReactComponentRegistry } from '@optimizely/cms-sdk/react/server'
-
-// Imports: every content-type + component tuple
-import HeroBlock, {
-  HeroBlockContentType,
-} from '@/components/optimizely/block/hero-block'
-import CMSPage, {
-  CMSPageContentType,
-} from '@/components/optimizely/page/CMSPage'
-import BlankExperience from '@/components/optimizely/experience/BlankExperience'
-import BlankSection from '@/components/optimizely/section/BlankSection'
-import ProfileBlock, {
-  ProfileBlockContentType,
-  ProfileBlockDisplayTemplate,
-} from '@/components/optimizely/block/profile-block'
-
-// 1. Content types — tells the SDK how to resolve __typename, validate shapes,
-//    and traverse nested fields. Must include every type referenced by your
-//    schemas, including built-ins you use (BlankExperienceContentType).
-initContentTypeRegistry([
-  HeroBlockContentType,
-  ProfileBlockContentType,
-  CMSPageContentType,
   BlankExperienceContentType,
-])
+  BlankSectionContentType,
+} from '@optimizely/cms-sdk';
+import { initReactComponentRegistry } from '@optimizely/cms-sdk/react/server';
 
-// 2. React components — maps content-type keys to default exports. The
-//    resolver key is the content-type KEY (e.g. 'HeroBlock'), NOT the
-//    content-type object. Here the shorthand `{ HeroBlock }` uses ES object
-//    shorthand because the variable name matches the key.
+// Schema modules — each file exports a `…CT` const built with contentType()
+import * as contentTypes from '@/content-types';
+
+// Display template modules — each exports a `…DisplayTemplate` const built with displayTemplate()
+import * as displayTemplates from '@/display-templates';
+
+// React components — `pages/blocks/elements/experiences` re-exported from src/components/index.ts
+import * as components from '@/components';
+
+import { getGraphGatewayUrl } from '@/lib/config';
+
+// 1. Configure the Graph client once. getClient() reads from this config —
+//    every fetcher uses getClient() instead of `new GraphClient()`.
+if (process.env.OPTIMIZELY_GRAPH_SINGLE_KEY) {
+  config({
+    apiKey: process.env.OPTIMIZELY_GRAPH_SINGLE_KEY,
+    graphUrl: getGraphGatewayUrl(),
+    // Optional:
+    // host: 'https://example.com',           // multi-site default filter
+    // maxFragmentThreshold: 100,             // raise only if you understand why
+    // cache: true,                           // SDK-side cache; default true
+  });
+}
+
+// 2. Content types — the SDK uses these to resolve __typename, validate
+//    shapes, traverse nested fields, and emit GraphQL fragments.
+//    initContentTypeRegistry REPLACES the registry — built-ins are NOT
+//    auto-merged. Add them explicitly when used.
+initContentTypeRegistry([
+  ...Object.values(contentTypes),
+  BlankExperienceContentType,
+  BlankSectionContentType,
+]);
+
+// 3. Display templates — visual variants registered separately.
+initDisplayTemplateRegistry([...Object.values(displayTemplates)]);
+
+// 4. React components — maps content-type KEY (string) to default export.
+//    Object shorthand `{ HeroBlock }` works when the variable name matches
+//    the content-type key.
 initReactComponentRegistry({
   resolver: {
-    HeroBlock,
-    ProfileBlock,
-    CMSPage,
-    BlankExperience,
-    BlankSection,
+    ArticlePage: components.ArticlePage,
+    HeroBlock: components.HeroBlock,
+    BlankExperience: components.BlankExperience,
+    BlankSection: components.BlankSection,
+    // ... one entry per content-type key in CMS content
   },
-})
-
-// 3. Display templates — optional visual variants registered separately.
-initDisplayTemplateRegistry([ProfileBlockDisplayTemplate])
+});
 ```
+
+## `config()` vs `new GraphClient()`
+
+v2 added `config({...})` + `getClient()` so callers don't have to construct a client per-fetch. Construct in one place, read everywhere:
+
+```ts
+// Anywhere a fetch is needed
+import { getClient } from '@optimizely/cms-sdk';
+const client = getClient();
+const items = await client.getContentByPath('/no/about/');
+```
+
+`new GraphClient(key, options)` still works for explicit construction (the webhook in `src/app/hooks/graph/route.ts` uses raw `fetch()` because it's at the module-load layer, but a `new GraphClient()` would also work). For app code, prefer `getClient()`.
+
+### Why prefer `getClient()`
+
+- Single config point — change API key/Graph URL in one place
+- No env-var threading through every page/component
+- `'use cache'` functions stay deterministic by argument shape (the client is implicit, not part of the key)
 
 ## Loading order
 
 ```
-app/layout.tsx  ─→ import '@/lib/optimizely/init'     (side-effect import)
-                   └─ runs all three `init*Registry` calls at module-evaluation time
-                      (re-executes per request in dev; effectively per server boot in prod
-                       depending on deployment model — serverless cold-starts re-run it)
+src/app/layout.tsx ─→ import '@/optimizely'   (side-effect import)
+                       └─ runs config() + all three init*Registry() calls
+                          at module-evaluation time (re-runs per dev edit,
+                          once per server cold-start in production)
 ```
 
-The import must happen **before any `OptimizelyComponent` is rendered**. Placing it in the root layout guarantees this: Next.js evaluates the root layout module before any page module, and the side-effect import runs synchronously during that evaluation.
+The import must happen **before any `OptimizelyComponent` is rendered**. Placing it in the root layout guarantees this: Next.js evaluates the root layout module before any page module, and the side-effect import runs synchronously during evaluation.
 
-Do **not** lazy-load, do **not** import only from some pages, do **not** put it inside a `useEffect`.
+Do **not** lazy-load. Do **not** import only from some pages. Do **not** put it inside a `useEffect`.
 
-### Why `init.ts` and not `layout.tsx` directly
+### Why `optimizely.ts` and not `layout.tsx` directly
 
-You could in principle put all three `init*Registry` calls inline in `app/layout.tsx`. Don't. The layout would have to import every block, page, experience, section, and display template — turning the root layout into a config dumping ground. `init.ts` is the bootstrap equivalent of a DI container registration module: one file whose only job is wiring, kept separate from HTML-shell concerns.
+You could put all four calls inline in `app/layout.tsx`. Don't. The layout would have to import every content type, every component, every display template — turning it into a config dumping ground. `optimizely.ts` is the bootstrap equivalent of a DI container registration module: one file whose only job is wiring, kept separate from HTML-shell concerns.
 
 ## Asymmetric failure modes — the key gotcha
 
-Forgetting to register a content type produces a **loud** CLI error during `opti-push`:
+Forgetting to register a content type produces a **loud** CLI error during `cms:push-config`:
 > Error: Content type 'HeroBlock' referenced but not in registry.
 
 Forgetting to register a React component produces a **silent** blank render:
-> `OptimizelyComponent` receives a `__typename` the resolver doesn't know about, falls back to rendering nothing, no log, no exception.
+> `OptimizelyComponent` receives a `__typename` the resolver doesn't know about, falls back to rendering nothing — no log, no exception.
 
 This asymmetry is the dominant debugging story. Rule: whenever something renders blank for a specific content type, check `initReactComponentRegistry.resolver` first. Always. Before any other hypothesis.
 
-The only other silent miss at this layer: a content-type file placed outside `./components/optimizely/**/*.tsx`. The CLI scan won't find it; `opti-push` pushes nothing; the CMS editor never shows the new type. No error.
+The other silent miss: a content-type file outside the `components` glob in `optimizely.config.mjs`. The CLI scan won't find it; `cms:push-config` pushes nothing; the CMS editor never sees the new type. No error.
 
-## The three-registry contract
+## The four-call contract
 
-| Registry call | If omitted | If out of order |
+| Call | If omitted | If out of order |
 |---|---|---|
-| `initContentTypeRegistry([...])` | `OptimizelyComponent` can't resolve `__typename` → renders nothing or throws | Types must be registered before the React registry uses them at render time; call order within the file is conventional (content types first, components second, display templates third) |
-| `initReactComponentRegistry({ resolver })` | `OptimizelyComponent` renders nothing for content whose key isn't in the map | — |
-| `initDisplayTemplateRegistry([...])` | Display templates are ignored; components receive `displaySettings: undefined` | — |
+| `config({...})` | `getClient()` returns a client with no config — fetches fail at runtime with "missing apiKey" | Must run before any `getClient()` call. Per convention, first in the file. |
+| `initContentTypeRegistry([...])` | `OptimizelyComponent` can't resolve `__typename` → renders nothing or throws | Must precede render. By convention, second. |
+| `initDisplayTemplateRegistry([...])` | Display templates ignored; components receive `displaySettings: undefined` | Position-independent in practice, but conventionally third. |
+| `initReactComponentRegistry({ resolver })` | `OptimizelyComponent` renders nothing for content whose key isn't in the map | Last; resolver receives requests post-init. |
 
-Only `initContentTypeRegistry` is strictly sequential with the others. In practice always call them in the order above.
+Only `config` is strictly required to come first (because the others are pure registry mutations). In practice, always call them in the order above.
 
-## Resolver object forms
+## Resolver shapes
 
 The resolver accepts multiple shapes:
 
@@ -103,93 +134,117 @@ The resolver accepts multiple shapes:
 initReactComponentRegistry({
   resolver: {
     HeroBlock,
-    CMSPage,
+    ArticlePage,
   },
-})
+});
 ```
 
-### Tag variants (for `:Tag` suffix rendering)
+### Tag variants — object form (recommended for ≥2 variants)
 ```ts
 initReactComponentRegistry({
   resolver: {
-    'Tile':          DefaultTile,
-    'Tile:Square':   SquareTile,
-    'Tile:Outlined': OutlinedTile,
+    Tile: {
+      default: DefaultTile,
+      tags: {
+        Square: SquareTile,
+        Outlined: OutlinedTile,
+      },
+    },
   },
-})
+});
 ```
 
-The SDK looks up `ContentType:Tag` first, falls back to `ContentType` if no tag match. Tag is read from `content.__tag` at render time.
+### Tag variants — colon form (concise for 1)
+```ts
+initReactComponentRegistry({
+  resolver: {
+    'Tile': DefaultTile,
+    'Tile:Square': SquareTile,
+  },
+});
+```
+
+The SDK first checks `Tile:<tag>`, falls back to `Tile`. Tag is read from the content's display-template `tag` field.
 
 ### Function resolver
 ```ts
 initReactComponentRegistry({
   resolver: (contentType, options) => {
     if (contentType === 'Button') {
-      return options?.tag === 'primary' ? PrimaryButton : DefaultButton
+      return options?.tag === 'primary' ? PrimaryButton : DefaultButton;
     }
-    return undefined
+    return undefined;
   },
-})
+});
 ```
 
-Useful for dynamic/computed lookups. Return `undefined` to fall back to the SDK default (which typically renders nothing).
-
-## Separating the content-type list for re-use
-
-Pages that allow blocks as children reference a shared list in `AllBlocksContentTypes`:
-
-```ts
-// lib/optimizely/content-types.ts
-import { HeroBlockContentType } from '@/components/optimizely/block/hero-block'
-import { ProfileBlockContentType } from '@/components/optimizely/block/profile-block'
-// ... every block that should be placeable inside a CMSPage.blocks array
-
-export const AllBlocksContentTypes = [
-  HeroBlockContentType,
-  ProfileBlockContentType,
-]
-```
-
-Then in a page schema:
-```ts
-export const CMSPageContentType = contentType({
-  key: 'CMSPage',
-  baseType: '_page',
-  properties: {
-    blocks: {
-      type: 'array',
-      items: { type: 'content', allowedTypes: AllBlocksContentTypes },
-      localized: true,
-    },
-  },
-})
-```
-
-This keeps the "allowed child types" list in one place — when you add a new block, you add it here once.
-
-## Adding a new content type — full checklist
-
-1. **Create** `components/optimizely/block/<name>.tsx` co-locating:
-   - `export const XContentType = contentType({...})`
-   - `export default function X({ content }: { content: ContentProps<typeof XContentType> }) {...}`
-2. **Register in `lib/optimizely/init.ts`:**
-   - Add to `initContentTypeRegistry([...])`
-   - Add to `initReactComponentRegistry({ resolver: {...} })`
-3. **Allow in pages** — add to `AllBlocksContentTypes` in `lib/optimizely/content-types.ts` if the block should be placeable inside `CMSPage.blocks`.
-4. **Push to CMS:** `npm run opti-push`.
-5. **Verify:** the block appears in the CMS editor's block picker.
-
-Missing any of 1–4 produces a different failure:
-- Missing schema export → CLI push doesn't find it → block doesn't appear in CMS editor
-- Missing `initContentTypeRegistry` entry → SDK can't resolve `__typename` → `OptimizelyComponent` renders nothing
-- Missing `initReactComponentRegistry` entry → SDK has type info but no component → renders nothing
-- Missing `AllBlocksContentTypes` entry → block appears globally but not insertable inside `CMSPage`
+Useful for dynamic/computed lookups. Return `undefined` to fall back to the SDK default (which renders nothing).
 
 ## Built-in content types
 
-The SDK ships built-ins that you use but should not redefine:
+The SDK ships built-ins you use but should not redefine:
 - `BlankExperienceContentType`
 - `BlankSectionContentType`
 
-Include them in `initContentTypeRegistry` if your app renders them. The React component wrappers (`BlankExperience`, `BlankSection`) are **your** code — the SDK only provides the schema constants.
+Include them in `initContentTypeRegistry` if your CMS content references them (the default Visual Builder experience and section types do). The React component wrappers (`BlankExperience`, `BlankSection`) are **your** code — the SDK only provides the schema constants.
+
+```ts
+import {
+  BlankExperienceContentType,
+  BlankSectionContentType,
+} from '@optimizely/cms-sdk';
+
+initContentTypeRegistry([
+  ...Object.values(contentTypes),
+  BlankExperienceContentType,
+  BlankSectionContentType,
+]);
+```
+
+Omit `BlankSectionContentType` and Visual Builder sections will render blank when the editor places one. Omit `BlankExperienceContentType` and experiences render blank.
+
+## Adding a new content type — full checklist
+
+1. **Define the schema** (see `optimizely-cms-content-types` skill): create `src/content-types/NewType.ts` with `export const NewTypeCT = contentType({...})`.
+2. **Export from the barrel**: add to `src/content-types/index.ts` so the wildcard import in `src/optimizely.ts` picks it up.
+3. **Build the React component**: create `src/components/{pages,blocks,elements,experiences}/NewType.tsx` with `export default function NewType({ content }: { content: ContentProps<typeof NewTypeCT> }) {...}`.
+4. **Export from `src/components/index.ts`** so wildcard import picks it up.
+5. **Register in `src/optimizely.ts`**: the resolver entry. If the content-type key matches the component variable name, shorthand `{ NewType }` works.
+6. **Add to `optimizely.config.mjs`**: include the file path (or rely on a glob).
+7. **Push to CMS**: `npm run cms:push-config`.
+8. **Verify**: the type shows up in the CMS editor's block/page picker.
+
+Missing any of 1–7 produces a different failure mode:
+- Missing schema file → CLI doesn't push it → editor never sees the type
+- Missing barrel export → schema not registered → `OptimizelyComponent` can't resolve `__typename` → blank render
+- Missing React component or barrel export → resolver entry references undefined → blank render
+- Missing resolver entry → CMS content references a key the resolver doesn't know → blank render
+- Missing path in `optimizely.config.mjs` → CLI doesn't push the schema (same as #1)
+- Missing `cms:push-config` run → schema in code, not in CMS → editor doesn't see the type
+
+## Pattern: barrel exports for wildcard registration
+
+Using `import * as contentTypes from '@/content-types'` and `[...Object.values(contentTypes)]` means a new type registers automatically once you add it to `src/content-types/index.ts`. Same for display templates and components.
+
+The trade-off: every export must be a content-type constant. Don't put type-only exports or utility functions in the barrel — `Object.values()` would include them and `initContentTypeRegistry` would reject the non-content-type entries.
+
+If you need utilities alongside the schema, put them in a separate file:
+```
+src/content-types/
+  index.ts           — only `export { XCT } from './X'` lines
+  ArticlePage.ts     — exports ArticlePageCT only
+  HeroBlock.ts       — exports HeroBlockCT only
+  _shared.ts         — utility types (filename prefixed with _ to skip the glob)
+```
+
+## Component `index.ts` must match resolver keys
+
+The barrel re-exports in `src/components/index.ts` use the file's default export. The key in `initReactComponentRegistry.resolver` must match the **content-type key**, not the file name. Conventions:
+
+- Content-type key: `HeroBlock` (PascalCase, no suffix)
+- Schema constant: `HeroBlockCT` (PascalCase + `CT`)
+- File name: `HeroBlock.tsx` (matches the key)
+- Component default export: `HeroBlock` (matches the key)
+- Resolver entry: `HeroBlock: components.HeroBlock` (or shorthand `HeroBlock`)
+
+Mismatch any of these and you get a silent blank render.

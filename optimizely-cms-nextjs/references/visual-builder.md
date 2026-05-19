@@ -1,42 +1,45 @@
 # Visual Builder Rendering
 
-Experiences and sections use the SDK's `OptimizelyComposition` and `OptimizelyGridSection` components to render nested node trees assembled in Visual Builder.
+Experiences and sections use the SDK's `OptimizelyComposition` and `OptimizelyGridSection` to render nested node trees assembled in Visual Builder.
 
 ## Three baseTypes collaborate
 
 - `_experience` — the outer container; renders a flat list of composition nodes via `OptimizelyComposition`.
 - `_section` — a grid-capable container; renders rows/columns via `OptimizelyGridSection`.
-- `_component` with `compositionBehaviors: ['sectionEnabled']` — a block that editors can use as a top-level item in an experience.
+- `_component` with `compositionBehaviors: ['sectionEnabled']` — a block that editors can place as a top-level item in an experience.
+- `_component` with `compositionBehaviors: ['elementEnabled']` — a block that editors can place as an element inside a section's grid (with property-type restrictions; see content-types skill).
 
-The `BlankExperienceContentType` and `BlankSectionContentType` constants are SDK built-ins — include them in `initContentTypeRegistry` but you supply the React components (`BlankExperience`, `BlankSection`).
+There is **no separate `_element` baseType**. Elements are just `_component` types with `elementEnabled`. See the `optimizely-cms-content-types` skill for the schema-side concerns (element property restrictions, etc.).
 
-## BlankExperience — the canonical experience wrapper
+The `BlankExperienceContentType` and `BlankSectionContentType` constants are SDK built-ins — include them in `initContentTypeRegistry` but supply your own React components (`BlankExperience`, `BlankSection`).
+
+## BlankExperience — canonical experience wrapper
 
 ```tsx
-// components/optimizely/experience/BlankExperience.tsx
-import { BlankExperienceContentType, ContentProps } from '@optimizely/cms-sdk'
+// src/components/experiences/BlankExperience.tsx
+import { BlankExperienceContentType, ContentProps } from '@optimizely/cms-sdk';
 import {
   ComponentContainerProps,
   OptimizelyComposition,
   getPreviewUtils,
-} from '@optimizely/cms-sdk/react/server'
+} from '@optimizely/cms-sdk/react/server';
 
-type Props = { content: ContentProps<typeof BlankExperienceContentType> }
+type Props = { content: ContentProps<typeof BlankExperienceContentType> };
 
 function ComponentWrapper({ children, node }: ComponentContainerProps) {
-  const { pa } = getPreviewUtils(node)
-  return <div {...pa(node)}>{children}</div>
+  const { pa } = getPreviewUtils(node);
+  return <div className="mb-2" {...pa(node)}>{children}</div>;
 }
 
 export default function BlankExperience({ content }: Props) {
   return (
-    <main className="blank-experience">
+    <main>
       <OptimizelyComposition
-        nodes={content.composition.nodes ?? []}
+        nodes={content.composition?.nodes ?? []}
         ComponentWrapper={ComponentWrapper}
       />
     </main>
-  )
+  );
 }
 ```
 
@@ -45,57 +48,46 @@ export default function BlankExperience({ content }: Props) {
 | Prop | Type | Purpose |
 |---|---|---|
 | `nodes` | `ExperienceNode[]` | Flat list from `content.composition.nodes` |
-| `ComponentWrapper` | `({children, node}) => JSX.Element` | Optional. Wraps each top-level component node. Spread `{...pa(node)}` on the outermost element so editors can click-to-edit. |
+| `ComponentWrapper` | `({children, node}: ComponentContainerProps) => JSX.Element` | Optional. Wraps each top-level component node. Spread `{...pa(node)}` on the outermost element so editors can click-to-edit. |
 
 Each node is either a component node (has `component` + metadata) or a structure node (row/column/section). `OptimizelyComposition` recursively renders both, delegating component resolution to `OptimizelyComponent` (which reads `initReactComponentRegistry`).
 
-## BlankSection — the canonical grid wrapper
+## BlankSection — canonical grid wrapper
 
 ```tsx
-// components/optimizely/section/BlankSection.tsx
-import { BlankSectionContentType, ContentProps } from '@optimizely/cms-sdk'
+// src/components/experiences/BlankSection.tsx (abbreviated)
+import { BlankSectionContentType, ContentProps } from '@optimizely/cms-sdk';
 import {
   OptimizelyGridSection,
   StructureContainerProps,
   getPreviewUtils,
-} from '@optimizely/cms-sdk/react/server'
+} from '@optimizely/cms-sdk/react/server';
 
-function Row({ children, node }: StructureContainerProps) {
-  const { pa } = getPreviewUtils(node)
+function Row({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
   return (
-    <div
-      className="vb:row flex flex-1 flex-col flex-nowrap md:flex-row"
-      {...pa(node)}
-    >
-      {children}
-    </div>
-  )
+    <div className="vb:row flex flex-row gap-6" {...pa(node)}>{children}</div>
+  );
 }
 
-function Column({ children, node }: StructureContainerProps) {
-  const { pa } = getPreviewUtils(node)
+function Column({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
   return (
-    <div
-      className="vb:col flex flex-1 flex-col flex-nowrap justify-start"
-      {...pa(node)}
-    >
-      {children}
-    </div>
-  )
+    <div className="vb:col flex-1 flex flex-col gap-4 min-w-0" {...pa(node)}>{children}</div>
+  );
 }
 
-type Props = { content: ContentProps<typeof BlankSectionContentType> }
+type Props = { content: ContentProps<typeof BlankSectionContentType> };
 
 export default function BlankSection({ content }: Props) {
-  const { pa } = getPreviewUtils(content)
+  const { pa } = getPreviewUtils(content);
   return (
-    <section
-      className="vb:grid relative flex w-full flex-col flex-wrap"
-      {...pa(content)}
-    >
-      <OptimizelyGridSection nodes={content.nodes} row={Row} column={Column} />
+    <section className="vb:grid relative w-full py-12 px-4 overflow-visible" {...pa(content)}>
+      <div className="max-w-7xl mx-auto w-full">
+        <OptimizelyGridSection nodes={content.nodes} row={Row} column={Column} />
+      </div>
     </section>
-  )
+  );
 }
 ```
 
@@ -103,12 +95,41 @@ export default function BlankSection({ content }: Props) {
 
 | Prop | Type | Purpose |
 |---|---|---|
-| `nodes` | `ExperienceNode[]` | From `content.nodes` (note: NOT `content.composition.nodes` — sections use a flatter shape) |
+| `nodes` | `ExperienceNode[]` | From `content.nodes` (NOT `content.composition.nodes` — sections use a flatter shape) |
 | `row` | `(props: StructureContainerProps) => JSX.Element` | Optional. Wraps each row. |
 | `column` | `(props: StructureContainerProps) => JSX.Element` | Optional. Wraps each column. |
-| `displaySettings` | `DisplaySettingsType[]` | Optional. Per-node display settings. |
 
-Defaults to SDK-provided row/column wrappers if you omit the props. Always provide your own to apply layout styling and preview attributes.
+Defaults to SDK-provided row/column wrappers if you omit the props — but always provide your own so you can apply layout styling and attach preview attributes (`{...pa(node)}`).
+
+### `StructureContainerProps`
+
+```ts
+type StructureContainerProps = {
+  children: React.ReactNode;
+  node: ExperienceStructureNode;             // { key, displayTemplateKey, ... }
+  displaySettings?: Record<string, unknown>; // resolved from nodeType: 'row' | 'column' display templates
+};
+```
+
+`displaySettings` is populated when a `displayTemplate({ nodeType: 'row' | 'column', settings: {...} })` matches the structure node and the editor has selected variant settings. Read it in your wrapper to apply editor-driven styling:
+
+```tsx
+function Row({ children, node, displaySettings }: StructureContainerProps) {
+  const { pa } = getPreviewUtils(node);
+  const gap = displaySettings?.columnGap ?? 'medium';
+  const align = displaySettings?.verticalAlignment ?? 'start';
+  return (
+    <div
+      className={cn('vb:row flex flex-row', gapClass[gap], alignClass[align])}
+      {...pa(node)}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+Schema for row/column display templates lives in the content-types skill (`references/standard-types.md` row/column section).
 
 ### The `vb:` class prefix
 
@@ -117,15 +138,15 @@ Visual Builder expects:
 - `vb:row` on each row
 - `vb:col` on each column
 
-These aren't Tailwind classes — they're **marker classes** the Visual Builder UI looks for to identify layout regions. Keep them. If they're missing, the editor UI can't position drop zones correctly.
+These are **marker classes** the Visual Builder UI looks for to identify layout regions. Not Tailwind, not optional. If they're missing, the editor UI can't position drop zones correctly — section content renders fine in the public site but is uneditable in the CMS preview.
 
-## `getPreviewUtils(node)` — what `pa()` returns
+## `getPreviewUtils(target)` — `pa()` and `src()`
 
 ```ts
-const { pa, src } = getPreviewUtils(node)
+const { pa, src } = getPreviewUtils(target);
 ```
 
-### `pa(target?)` → data attributes for click-to-edit
+### `pa(target?)` → click-to-edit attributes
 
 ```tsx
 <h1 {...pa('title')}>{content.title}</h1>          // property-scoped edit
@@ -134,93 +155,104 @@ const { pa, src } = getPreviewUtils(node)
 <div {...pa({ key: 'customId' })}>                  // custom key form
 ```
 
-- In **preview/edit mode**, returns attributes like `{'data-epi-property-name': 'title'}` or `{'data-epi-block-id': 'abc123'}`.
-- In **published mode**, returns `{}` — the spread is a no-op.
+- In **preview/edit mode**: returns `data-epi-*` attributes (e.g. `{ 'data-epi-property-name': 'title' }`).
+- In **published mode**: returns `{}` — the spread is a no-op.
 
-You can spread on any element; it's always safe.
+Safe to spread on any element regardless of mode.
 
-### `src(input)` → preview-aware URLs
+### `src(input)` → preview-aware URL
 
 ```tsx
-const { src } = getPreviewUtils(content)
+const { src } = getPreviewUtils(content);
 <img src={src(content.image)} alt="" />
 ```
 
-Appends preview tokens to image URLs when rendering in preview mode so unpublished asset versions resolve. In published mode, returns the URL unchanged. Omit this and draft images won't load in preview.
+In preview mode, appends the preview token (from context) to image URLs so unpublished asset versions resolve. In published mode, returns the URL unchanged. Omit this and draft images won't load when an editor previews a page with newly-uploaded media.
 
-## `data-epi-edit` on leaf elements
+Works with `next/image` too:
+```tsx
+<Image src={src(content.image)!} alt={getAlt(content.image, '')} fill />
+```
 
-For non-Visual-Builder blocks (plain `_component` types), you annotate editable text/attributes directly:
+(The `!` non-null assertion is acceptable here — you've already checked `content.image` exists; `src()` returns `string | undefined`.)
+
+## `data-epi-edit` for plain blocks (alternative to `pa`)
+
+For non-Visual-Builder blocks where editing happens through the form-based property editor rather than click-to-edit, you can annotate editable text directly:
 
 ```tsx
 <h1 data-epi-edit="title">{title}</h1>
 <p  data-epi-edit="subtitle">{subtitle}</p>
 ```
 
-The attribute value is the property key from the content-type schema. This is lower-level than `pa()` — use it in regular blocks; use `pa()` in experience/section wrappers where the target is a node, not a named property.
+The attribute value is the property key from the content-type schema. Lower-level than `pa()` — use `pa()` in experience/section wrappers (where the target is a node, not a property), and use `pa('propertyName')` or `data-epi-edit="propertyName"` in regular blocks (both work; `pa` is preferred since it's a no-op in published mode).
 
 ### Exact-match requirement — common silent failure
 
-The attribute value is matched character-for-character against the keys in the `contentType()` definition:
+The attribute value is matched character-for-character against the schema property keys:
 
 ```tsx
-// contentType declares { title: ..., subtitle: ... }
-<h1 data-epi-edit="title">{title}</h1>       // ✓ click-to-edit works
-<p  data-epi-edit="sub-title">{subtitle}</p> // ✗ mismatch — click-to-edit silently disabled for subtitle
-<p  data-epi-edit="Subtitle">{subtitle}</p>  // ✗ case mismatch — silently disabled
+// contentType declares { title, subtitle }
+<h1 data-epi-edit="title">{title}</h1>          // ✓ click-to-edit works
+<p  data-epi-edit="sub-title">{subtitle}</p>   // ✗ kebab mismatch — silently disabled
+<p  data-epi-edit="Subtitle">{subtitle}</p>    // ✗ case mismatch — silently disabled
 ```
 
-Only that one field loses click-to-edit; the rest of the component still works. The editor sees no error, just no inline-edit affordance on the broken field. When troubleshooting "field X can't be clicked in preview but others can", check the attribute value first.
+Only the broken field loses click-to-edit; everything else still works. The editor sees no error, just no inline-edit affordance on that specific field. When troubleshooting "I can edit X but not Y in preview", check the attribute value first.
 
-## `compositionBehaviors` — letting a block be a section
+## `compositionBehaviors` — letting a block be a section/element
 
 If a block should be placeable as a top-level Visual Builder node (not just nested inside a section), mark it:
 
 ```ts
-export const HeroBlockContentType = contentType({
+export const HeroBlockCT = contentType({
   key: 'HeroBlock',
   baseType: '_component',
   compositionBehaviors: ['sectionEnabled'],
-  properties: { ... },
-})
+  properties: { /* ... */ },
+});
 ```
 
 Valid values:
 - `'sectionEnabled'` — block can appear as a section in an experience
 - `'elementEnabled'` — block can appear as an inline element inside a section
 
-`_element` is a separate baseType; don't use `'elementEnabled'` on `_component` unless you specifically need the dual use case (content-types skill covers the distinction).
+Both can coexist (`['sectionEnabled', 'elementEnabled']`). When using `elementEnabled`, the schema must respect element property restrictions (no `content`/`component`/`json` properties, no arrays of content) — see the content-types skill.
 
 ## Display templates on composition nodes
 
-If a content type has multiple display templates, the editor picks one per placement. At render time:
+When a content type has multiple display templates, the editor picks one per placement. At render time, the SDK passes `displaySettings` as the component's second prop:
 
 ```tsx
-// The SDK passes displaySettings as a second component prop
+// Component receives content + displaySettings
 export default function ProfileBlock({
-  content: { name, title, bio },
+  content,
   displaySettings,
 }: {
-  content: ContentProps<typeof ProfileBlockContentType>
-  displaySettings?: Record<string, string>
+  content: ContentProps<typeof ProfileBlockCT>;
+  displaySettings?: ContentProps<typeof ProfileBlockDisplayTemplate>;
 }) {
-  const colorScheme = displaySettings?.colorScheme ?? 'default'
-  return <section className={backgroundVariants({ colorScheme })}>...</section>
+  const colorScheme = displaySettings?.colorScheme ?? 'default';
+  return <section className={backgroundVariants({ colorScheme })}>...</section>;
 }
 ```
 
-Register the template via `initDisplayTemplateRegistry([ProfileBlockDisplayTemplate])`. See the content-types skill for template definition syntax.
+Register the template via `initDisplayTemplateRegistry([ProfileBlockDisplayTemplate])` in `src/optimizely.ts`. See the content-types skill for template definition syntax and component-variant registration patterns (`{ default, tags }` vs `'Key:Tag'`).
 
 ## Debugging Visual Builder rendering
 
-- **Nodes render but can't be edited** → missing `{...pa(node)}` on the wrapper element.
-- **Drop zones don't appear in editor** → missing `vb:grid` / `vb:row` / `vb:col` classes.
-- **"Component not found" in render** → the composition references a content type that isn't in `initReactComponentRegistry.resolver`.
-- **Layout styles applied twice / conflicting** → you probably wrapped both `<BlankExperience>` and a section inside another layout container; Visual Builder already handles nesting.
-- **Images load in preview but not in edit** → missing `src()` wrapping; use `getPreviewUtils.src(content.image)` instead of `content.image` directly.
+| Symptom | Cause |
+|---|---|
+| Nodes render but can't be edited | Missing `{...pa(node)}` on the wrapper element |
+| Drop zones don't appear in the editor | Missing `vb:grid` / `vb:row` / `vb:col` classes |
+| "Component not found" in render | Content type referenced by the composition isn't in `initReactComponentRegistry.resolver` |
+| Layout styles applied twice / conflicting | Probably wrapped `<BlankExperience>` AND a section inside another layout container — Visual Builder already handles nesting |
+| Images load in published but not in preview | Missing `src()` wrapping — use `getPreviewUtils(content).src(content.image)` not `content.image.url.default` |
+| `displaySettings` is `undefined` in component | Either no display template registered for the type, or the editor hasn't picked one (defaults to undefined) |
+| Section content renders empty in preview | `BlankSectionContentType` not in `initContentTypeRegistry` — SDK can't resolve the section type |
 
 ## Where this pattern lives in the SDK
 
-- `OptimizelyComposition`, `OptimizelyGridSection`, `getPreviewUtils`, `ComponentContainerProps`, `StructureContainerProps` — all from `@optimizely/cms-sdk/react/server`.
-- `BlankExperienceContentType`, `BlankSectionContentType` — from `@optimizely/cms-sdk`.
-- Official reference: `D:\Dev\content-js-sdk\docs\8-experience.md`.
+- `OptimizelyComposition`, `OptimizelyGridSection`, `getPreviewUtils`, `ComponentContainerProps`, `StructureContainerProps` — `@optimizely/cms-sdk/react/server`
+- `BlankExperienceContentType`, `BlankSectionContentType` — `@optimizely/cms-sdk`
+- Official reference: <https://github.com/episerver/content-js-sdk/blob/main/docs/8-experience.md>

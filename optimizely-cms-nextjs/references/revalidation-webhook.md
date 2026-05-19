@@ -1,258 +1,281 @@
-# Revalidation Webhook (`/api/revalidate`)
+# Revalidation Webhook (`/hooks/graph`)
 
-Receives a POST from Optimizely CMS when content is published. Authenticates, resolves the published item's URL, and invalidates the right cache entry.
+Receives a POST from Optimizely Graph when content is published. Authenticates via `x-api-key` header, resolves the docId to a URL, invalidates the right cache entries, and fires a CDN purge for the affected URL.
 
 ## Full route
 
 ```ts
-// app/api/revalidate/route.ts
-import { GraphClient } from '@optimizely/cms-sdk'
-import { revalidatePath, revalidateTag } from 'next/cache'
-import { type NextRequest, NextResponse } from 'next/server'
-import { CACHE_KEYS, getCacheTag } from '@/lib/cache/cache-keys'
+// src/app/hooks/graph/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import { purgeCdnCache } from '@/lib/cdn-cache';
+import { CACHE_KEYS, getArticlesUnderTag } from '@/lib/cache/cache-keys';
 
-const OPTIMIZELY_REVALIDATE_SECRET = process.env.OPTIMIZELY_REVALIDATE_SECRET
+const CALLBACK_API_KEY = process.env.OPTIMIZELY_GRAPH_CALLBACK_APIKEY;
+const singleKey = process.env.OPTIMIZELY_GRAPH_SINGLE_KEY!;
+const gateway = (process.env.OPTIMIZELY_GRAPH_GATEWAY ?? 'https://cg.optimizely.com').replace(/\/+$/, '');
+const graphUrl = `${gateway}/content/v2`;
 
-export async function POST(request: NextRequest) {
-  try {
-    validateWebhookSecret(request)
-    const docId = await extractDocId(request)
-
-    if (!docId || !docId.includes('Published')) {
-      return NextResponse.json({ message: 'No action taken' })
-    }
-
-    const [guid, locale] = docId.split('_')
-    const formattedGuid = guid.replaceAll('-', '')
-
-    const client = new GraphClient(process.env.OPTIMIZELY_GRAPH_SINGLE_KEY!, {
-      graphUrl: process.env.OPTIMIZELY_GRAPH_URL,
-    })
-
-    const contentData = await client.request(GET_CONTENT_BY_GUID_QUERY, {
-      guid: formattedGuid,
-      locale: [locale],
-    } as any)
-
-    const content = contentData?._Content?.item
-    const urlType = content?._metadata?.url?.type
-
-    // Hierarchical: Start Page is NOT '/' — it has a real path like '/start-page'.
-    // Strip OPTIMIZELY_START_PAGE_URL to normalize.
-    const url =
-      urlType === 'SIMPLE'
-        ? content?._metadata?.url?.default
-        : content?._metadata?.url?.hierarchical?.replace(
-            process.env.OPTIMIZELY_START_PAGE_URL ?? '',
-            '',
-          )
-
-    if (!url) {
-      return NextResponse.json({ message: 'Page Not Found' }, { status: 400 })
-    }
-
-    const urlWithLocale = normalizeUrl(url, locale)
-    await handleRevalidation(urlWithLocale, locale)
-
-    return NextResponse.json({ revalidated: true, now: Date.now() })
-  } catch (error) {
-    return handleError(error)
-  }
+async function graphRequest(query: string, variables: Record<string, unknown>) {
+  const res = await fetch(graphUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `epi-single ${singleKey}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) throw new Error(`GraphQL request failed (${res.status})`);
+  const json = await res.json();
+  return json.data;
 }
 
-const GET_CONTENT_BY_GUID_QUERY = `
-  query GetContentByGuid($guid: String, $locale: [Locales]) {
-    _Content(locale: $locale, where: { _metadata: { key: { eq: $guid } } }) {
-      item {
-        _metadata {
-          displayName
-          url { hierarchical default type }
-        }
+/** Resolve a docId to a URL path and revalidate. Returns the resolved
+ *  path on success, "" if the doc can't be resolved.
+ *
+ *  docId format: `{UUID}_{language}_Published` */
+async function revalidateDocId(docId: string): Promise<string> {
+  const [rawId, locale] = docId.split('_');
+  const id = rawId.replaceAll('-', '');
+  const response = await graphRequest(
+    `query GetPath($id: String, $locale: Locales) {
+       _Content(ids: [$id], locale: [$locale]) {
+         item { _metadata { url { default } } }
+       }
+     }`,
+    { id, locale },
+  );
+  const url = response?._Content?.item?._metadata?.url?.default;
+  if (!url) return '';
+  const path = url.endsWith('/') ? url.slice(0, -1) : url;
+  revalidatePath(path || '/');
+
+  // Invalidate every ancestor article-listing cache. revalidateTag on an
+  // unwritten tag is a no-op, so over-invalidating costs nothing.
+  const segments = path.split('/').filter(Boolean);
+  for (let i = 1; i < segments.length; i++) {
+    const parent = `/${segments.slice(0, i).join('/')}/`;
+    revalidateTag(getArticlesUnderTag(parent, locale), 'max');
+  }
+
+  // Sitemap is tagged with PATHS; cacheLife('hours') so revalidate accordingly.
+  revalidateTag(CACHE_KEYS.PATHS, 'hours');
+  return path || '/';
+}
+
+export async function POST(request: NextRequest) {
+  const apiKey = request.headers.get('x-api-key');
+  if (!CALLBACK_API_KEY || apiKey !== CALLBACK_API_KEY) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const payload = await request.json();
+  const { subject, action } = payload.type;
+  if (subject === 'doc' && (action === 'updated' || action === 'expired')) {
+    const path = await revalidateDocId(payload.data.docId);
+    if (path) {
+      const hostname = process.env.OPTIMIZELY_SITE_HOSTNAME?.replace(/^https?:\/\//, '');
+      if (hostname) {
+        purgeCdnCache([`https://${hostname}${path}`]).catch((err) =>
+          console.error('[hooks] CDN cache purge failed:', err.message),
+        );
       }
     }
   }
-`
-
-function validateWebhookSecret(request: NextRequest) {
-  const webhookSecret = request.nextUrl.searchParams.get('cg_webhook_secret')
-  if (webhookSecret !== OPTIMIZELY_REVALIDATE_SECRET) {
-    throw new Error('Invalid credentials')
-  }
-}
-
-async function extractDocId(request: NextRequest): Promise<string> {
-  const requestJson = await request.json()
-  return requestJson?.data?.docId || ''
-}
-
-function normalizeUrl(url: string, locale: string): string {
-  let normalizedUrl = url.startsWith('/') ? url : `/${url}`
-  if (normalizedUrl.endsWith('/')) normalizedUrl = normalizedUrl.slice(0, -1)
-  return normalizedUrl.startsWith(`/${locale}`)
-    ? normalizedUrl
-    : `/${locale}${normalizedUrl}`
-}
-
-async function handleRevalidation(urlWithLocale: string, locale: string) {
-  if (urlWithLocale.includes('footer')) {
-    const footerTag = getCacheTag(CACHE_KEYS.FOOTER, locale)
-    revalidateTag(footerTag, 'max')
-  } else if (urlWithLocale.includes('header')) {
-    const headerTag = getCacheTag(CACHE_KEYS.HEADER, locale)
-    revalidateTag(headerTag, 'max')
-  } else {
-    revalidatePath(urlWithLocale)
-  }
-}
-
-function handleError(error: unknown) {
-  console.error('Error processing webhook:', error)
-  if (error instanceof Error) {
-    if (error.message === 'Invalid credentials') {
-      return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 })
-    }
-    return NextResponse.json({ message: error.message }, { status: 500 })
-  }
-  return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 })
+  return NextResponse.json({ received: true });
 }
 ```
 
+## Authentication: `x-api-key` header (not query param)
+
+The webhook reads `x-api-key` from the request headers and compares against `OPTIMIZELY_GRAPH_CALLBACK_APIKEY`. **If the env var is missing in production, the webhook 401s every request silently** — from the editor's perspective, publishing "doesn't update the site". Always verify the env var is present in DXP before debugging anything else.
+
+Why header and not query param:
+- Headers don't end up in access logs by default — less leak surface
+- Easier to rotate (CMS Graph webhook config stores the secret server-side)
+- Matches Optimizely Graph's documented webhook auth pattern
+
 ## CMS webhook configuration
 
-Webhooks are managed at `https://cg.optimizely.com/api/webhooks` (see https://docs.developers.optimizely.com/platform-optimizely/docs/manage-webhooks).
+Webhooks are managed at `https://cg.optimizely.com/api/webhooks` (see <https://docs.developers.optimizely.com/platform-optimizely/docs/manage-webhooks>).
 
-Required configuration for the starter's pattern:
+Required configuration:
+- **Method**: POST
+- **URL**: `https://<your-domain>/hooks/graph`
+- **Headers**: `x-api-key: <OPTIMIZELY_GRAPH_CALLBACK_APIKEY>`
+- **Content-Type**: `application/json`
+- **Topics**: subscribe to `doc.updated`. The handler also responds to `doc.expired`.
+- **Filter**: `"filters": { "status": { "eq": "Published" } }` so draft saves don't trigger.
 
-- **Method:** POST
-- **URL:** `https://<your-domain>/api/revalidate?cg_webhook_secret=<OPTIMIZELY_REVALIDATE_SECRET>`
-- **Content-Type:** `application/json`
-- **Topics (must include BOTH):**
-  - `doc.updated` — single-document publish events
-  - `bulk.completed` — batch publish operations
-- **Filter:** `"filters": { "status": { "eq": "Published" } }`
-
-### Why both topics
-
-Omitting `bulk.completed` is a common silent-failure: an editor batch-publishing ten articles triggers one bulk event, not ten `doc.updated` events. Without the bulk subscription, every batch publish leaves pages stale.
+If publishes are heavy, also subscribe to `bulk.completed` and add a branch handling the bulk payload shape — this project's handler currently only routes single-doc events, which is sufficient for the typical editor workflow but misses big bulk operations.
 
 ### Why the status filter
 
-Without `status: { eq: "Published" }`, the webhook fires on draft saves too — every keystroke in the editor hits your endpoint. This burns Optimizely's webhook quota and hammers your cache for no user benefit. Always filter to Published.
-
-### Why shared secret
-
-The secret is a query parameter, **not a header**. Without it, `/api/revalidate` is a DoS / cache-thrash vector: any caller could force arbitrary path revalidations and blow out your caches. Always validate the secret — and see the Hardening section below for the next tier of protection.
+Without `status: { eq: "Published" }`, the webhook fires on draft saves — every keystroke in the editor potentially hits your endpoint, burning Optimizely's webhook quota and thrashing the cache for no benefit. Always filter to `Published`.
 
 ## Payload shape
 
 ```json
 {
-  "type":    { "subject": "doc", "action": "completed" },
+  "type":    { "subject": "doc", "action": "updated" },
   "data":    { "docId": "abc12345-6789-4def-0000-111122223333_en_Published" }
 }
 ```
 
-The `docId` is `<UUID-with-dashes>_<locale>_Published`. The route extracts guid + locale via `split('_')`, then strips dashes (`replaceAll('-', '')`) before querying Graph, because the Graph `_metadata.key` field stores the UUID without dashes.
+`docId` format: `<UUID-with-dashes>_<locale>_Published`.
 
-The `Published` suffix is the trigger — without it, we return `"No action taken"` (200) to prevent retries. Unpublished saves / other variation events don't warrant revalidation.
+The handler:
+1. Splits on `_` → `[rawId, locale]`
+2. Strips dashes from `rawId` → `id` (Graph stores keys without dashes in `_metadata.key`)
+3. Queries Graph for `_Content(ids: [id], locale: [locale])` → reads `_metadata.url.default`
+4. Strips trailing slash → calls `revalidatePath(path)`
 
-## URL resolution — SIMPLE vs hierarchical
+## URL resolution
 
-Optimizely Content Graph exposes two URL views:
+This repo uses `_metadata.url.default` exclusively — no SIMPLE-vs-hierarchical branching. The default URL is what the editor sees, what `getContentByPath` queries, and what the catch-all renders under. One source of truth.
 
-| `url.type` | Meaning | What to use |
-|---|---|---|
-| `SIMPLE` | Flat URL, CMS stores exactly what editors typed | `url.default` |
-| `HIERARCHICAL` | Tree-derived URL; includes the Start Page prefix | `url.hierarchical` with `OPTIMIZELY_START_PAGE_URL` stripped |
+If your CMS instance uses hierarchical routing where the Start Page has a real path that needs stripping (e.g. `/start-page/about`), you'd need:
 
-Example:
-- A page titled "About" under the Start Page `/start-page`:
-  - `url.hierarchical` = `/start-page/about/`
-  - `url.default` = `/about/` (if editor set it)
-  - With hierarchical routing → strip `/start-page` → `/about/`
-
-The hierarchical strip ONLY applies when `url.type !== 'SIMPLE'`. Don't blanket-strip the prefix.
-
-## URL normalization
-
-After resolving the CMS-side URL:
-1. Prepend `/` if missing
-2. Strip trailing `/`
-3. Prepend `/${locale}` if the path doesn't already start with the locale
-
-So `/about/` + locale `en` becomes `/en/about`. That's what `revalidatePath` expects — it must match what `[...slug]/page.tsx` renders under.
-
-## Tag vs path revalidation — the routing rule
-
-```
-urlWithLocale contains 'footer' → revalidateTag(getCacheTag(CACHE_KEYS.FOOTER, locale), 'max')
-urlWithLocale contains 'header' → revalidateTag(getCacheTag(CACHE_KEYS.HEADER, locale), 'max')
-otherwise                       → revalidatePath(urlWithLocale)
+```ts
+const url = response?._Content?.item?._metadata?.url?.default
+  ?? response?._Content?.item?._metadata?.url?.hierarchical?.replace(
+       process.env.OPTIMIZELY_START_PAGE_URL ?? '',
+       '',
+     );
 ```
 
-Why the split: Header and Footer are rendered by the locale layout on *every* page. A single `revalidatePath` couldn't reach them all — there's no one URL to target. Tags do: one `revalidateTag('optimizely-header-en', 'max')` call invalidates the Header cache entry for every page in `/en/*`.
+This project doesn't use hierarchical, so the simpler version above suffices.
 
-For a regular CMS page at `/en/about`, the content shows up in exactly one route, so `revalidatePath('/en/about')` is sufficient.
+## Tag invalidation — what gets invalidated and why
 
-**Always pass `'max'` as the second arg to `revalidateTag`** when the cached function used `cacheLife('max')`. Otherwise Next.js treats the tag as short-lived and silently no-ops on long-lived entries.
+Three things on every successful publish:
 
-### Header/Footer-as-CMS-page as a reusable template
+1. **`revalidatePath(path)`** — the page itself. The Redis cache entry tagged with the implicit `_N_T_<path>` tag is deleted.
 
-The "model shared config as a CMS page with its own cache tag" pattern isn't just for navigation. Apply it to anything that's (a) read on every page and (b) edited occasionally:
+2. **`revalidateTag(getArticlesUnderTag(parent, locale), 'max')` for every ancestor prefix** — invalidates any article-listing block that's filtering by ancestor path. For `/no/blog/post-1`:
+   - `parent = '/no/'`  → invalidates `opti-articles-under:/no/:no`
+   - `parent = '/no/blog/'` → invalidates `opti-articles-under:/no/blog/:no`
 
-- **SiteSettings** — per-locale Algolia keys, feature flags, analytics IDs exposed to the client.
-- **PromoBar** — site-wide announcement banner.
-- **GlobalFooter** — already in the starter.
-- **Legal text** — cookie banner copy, disclaimer text.
+   `revalidateTag` on an unwritten tag is a cheap no-op, so over-invalidating costs nothing. The 'max' second arg matches the listing block's `cacheLife('max')` profile.
 
-Template:
-1. Define a `_page` content type (e.g. `SiteSettingsPage`) at a fixed CMS path (e.g. `/{locale}/site-settings/`).
-2. Fetch it in a server component with `'use cache'` + `cacheTag(getCacheTag(CACHE_KEYS.SITE_SETTINGS, locale))`.
-3. In the webhook's URL routing, add a branch: `urlWithLocale.includes('site-settings') → revalidateTag(...)`.
+3. **`revalidateTag(CACHE_KEYS.PATHS, 'hours')`** — the sitemap. `cacheLife('hours')` so the 'hours' second arg matches.
 
-One editor edit → one tag invalidation → every rendered page sees the update on next request. Avoids path-based revalidation fan-out.
+The `'max'` / `'hours'` second argument is essential. Without it, `revalidateTag` silently no-ops against entries cached at a longer-lived profile.
 
-## Hardening — production considerations
+## CDN cache purge
 
-The starter's `/api/revalidate` is secret-gated but otherwise public. For production, consider:
+After `revalidatePath` succeeds, the handler fires a CDN purge for the affected URL:
 
-- **Rate limiting.** A leaked secret or a misconfigured CMS could flood the endpoint. Upstash Ratelimit + Redis is the canonical Next.js pattern: wrap the handler in a sliding-window limiter keyed by IP.
-- **IP allowlist.** Optimizely publishes the IP ranges its webhooks originate from. Narrow the endpoint to those ranges at the CDN/WAF layer.
-- **Structured logging.** Replace `console.log/error` with Pino or Winston (or your platform's structured logger). Log the `docId`, `urlType`, resolved `urlWithLocale`, and revalidation outcome for every request — otherwise silent failures are invisible.
-- **Error tracking.** Wire Sentry (or equivalent) around the handler. The try/catch currently swallows details into a JSON response body; errors need to land in an operational channel.
-- **Tests.** The webhook's docId parser + URL resolver has enough branches (SIMPLE vs hierarchical, header/footer vs page, missing URL, missing content) to warrant unit tests. No tests are in the starter — this is called out explicitly by the course as a production gap.
+```ts
+const hostname = process.env.OPTIMIZELY_SITE_HOSTNAME?.replace(/^https?:\/\//, '');
+if (hostname) {
+  purgeCdnCache([`https://${hostname}${path}`]).catch((err) =>
+    console.error('[hooks] CDN cache purge failed:', err.message),
+  );
+}
+```
 
-None of this is required for functional parity with the starter, but all of it is standard for a prod-grade CMS integration.
+`purgeCdnCache` lives in `src/lib/cdn-cache.ts`. It calls the Cloud Platform Services edge-cache API with a managed-identity Bearer token:
+
+```ts
+// src/lib/cdn-cache.ts (abbreviated)
+import { ManagedIdentityCredential } from '@azure/identity';
+
+const API_URL = (process.env.OPTIMIZELY_CLOUDPLATFORM_API_URL ?? '').replace(/\/+$/, '');
+const RESOURCE_ID = process.env.OPTIMIZELY_CLOUDPLATFORM_API_RESOURCE_ID;
+
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+async function getToken(): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 5 * 60 * 1000) {
+    return cachedToken.token;
+  }
+  const credential = process.env.AZURE_CLIENT_ID
+    ? new ManagedIdentityCredential({ clientId: process.env.AZURE_CLIENT_ID })
+    : new ManagedIdentityCredential();
+  const response = await credential.getToken(`${RESOURCE_ID}/.default`);
+  cachedToken = { token: response.token, expiresAt: response.expiresOnTimestamp };
+  return response.token;
+}
+
+export async function purgeCdnCache(urls?: string[]): Promise<void> {
+  if (!API_URL || !RESOURCE_ID) {
+    console.warn('CDN cache purge skipped: API URL or resource ID not configured');
+    return;
+  }
+  // ... POST to ${API_URL}/v1/edge-cache/purge with Bearer token ...
+}
+```
+
+The API is **asynchronous** — returns 202 Accepted with an `operationId` and processes the purge in the background. Treat it as fire-and-forget; the `.catch` in the webhook logs failures but doesn't retry.
+
+When `OPTIMIZELY_CLOUDPLATFORM_API_URL` / `OPTIMIZELY_CLOUDPLATFORM_API_RESOURCE_ID` are missing (typical for local dev), `purgeCdnCache` no-ops with a warning. That's the right behaviour for local — there's no CDN in front of the dev server.
 
 ## Error contract
 
+The handler always returns 200 (with `received: true` or an `error` field) so Optimizely doesn't retry on transient downstream failures. Optimizely's retry policy typically treats non-200 as retryable; returning 200 with an embedded error signals "I got it, don't retry, problem is on my side".
+
 | Situation | Response |
 |---|---|
-| `cg_webhook_secret` missing or wrong | 401 `{ "message": "Invalid credentials" }` |
-| `docId` missing or doesn't include `Published` | 200 `{ "message": "No action taken" }` |
-| Content not found in Graph | 400 `{ "message": "Page Not Found" }` |
-| Any other error | 500 `{ "message": <error.message> }` |
-| Success | 200 `{ "revalidated": true, "now": <timestamp> }` |
+| `x-api-key` missing or wrong | 401 `{ error: 'Unauthorized' }` |
+| docId resolves to no content | 200 `{ received: true }` (path empty, no revalidation) |
+| Graph query fails | 200 `{ received: true }` (error logged, doesn't throw out of POST) |
+| Successful revalidation | 200 `{ received: true }` |
 
-Optimizely's webhook retry policy typically treats non-200 responses as retryable. Returning 200 with `"No action taken"` is intentional for "don't retry, nothing to do" cases.
+The choice to suppress errors into 200 + log trades off retry hygiene for not flooding the editor with "publish failed" toasts. If you need stricter semantics, return 5xx for transient errors and accept the retry cost.
 
 ## Testing locally
 
-Use `curl` to simulate:
+Curl simulation:
 
 ```sh
-curl -X POST 'http://localhost:3000/api/revalidate?cg_webhook_secret=<your-secret>' \
+curl -X POST 'http://localhost:3000/hooks/graph' \
+  -H 'x-api-key: <your-secret>' \
   -H 'Content-Type: application/json' \
-  -d '{"data":{"docId":"abc12345-6789-4def-0000-111122223333_en_Published"}}'
+  -d '{"type":{"subject":"doc","action":"updated"},"data":{"docId":"<guid-with-dashes>_no_Published"}}'
 ```
 
-For a real test, the guid must match a published item in your Graph instance. Otherwise you'll get the "Page Not Found" branch — which confirms the auth+parse logic works but doesn't exercise the revalidation.
+For a real test, the guid must match a published item in your Graph instance. Otherwise the `_Content` query returns nothing, `path` is empty, and the response is `{ received: true }` with no revalidation — which confirms auth + parse works but doesn't exercise `revalidatePath`.
+
+## Adding a new tagged cache to the invalidation flow
+
+Pattern:
+1. Define the tag composer in `src/lib/cache/cache-keys.ts`:
+   ```ts
+   export const CACHE_KEYS = {
+     // ... existing ...
+     NEW_THING: 'opti-new-thing',
+   } as const;
+   ```
+2. Use it in the fetcher:
+   ```ts
+   'use cache';
+   cacheLife('max');
+   cacheTag(CACHE_KEYS.NEW_THING);
+   ```
+3. Add a branch in the webhook:
+   ```ts
+   revalidateTag(CACHE_KEYS.NEW_THING, 'max');
+   ```
+
+If the cache is keyed (e.g. per locale or per parent path), follow the `getArticlesUnderTag` pattern: a composer in `cache-keys.ts` that the webhook can call with the relevant inputs from the URL/payload.
+
+## Production hardening
+
+The handler is `x-api-key`-gated but otherwise public. For production at scale, consider:
+
+- **Rate limiting.** Wrap the handler in a sliding-window limiter (e.g. Upstash Ratelimit) keyed by IP.
+- **IP allowlist.** Optimizely publishes the IP ranges its webhooks originate from. Narrow at the WAF/CDN layer.
+- **Structured logging.** Replace `console.error` with a structured logger (Pino, Winston) — emit docId, resolved path, revalidation outcome.
+- **Error tracking.** Wire Sentry around the handler. The `.catch` on `purgeCdnCache` currently logs and forgets; production needs an alarm path.
+- **Unit tests** for the docId parser + revalidation routing. Enough branches (header/footer routing if you add it, ancestor invalidation, missing URL, etc.) to warrant coverage.
+
+None of this is required for functional parity — all of it is standard for prod-grade CMS integration.
 
 ## Debugging "content doesn't update after publish"
 
-1. **Secret mismatch** — check the CMS webhook config includes the right `cg_webhook_secret`. Mismatch returns 401, webhook retries eventually give up.
-2. **`revalidateTag` without `'max'`** — classic silent no-op. Verify the call uses `revalidateTag(tag, 'max')`.
-3. **`OPTIMIZELY_START_PAGE_URL` wrong or unset** — for hierarchical routing, wrong prefix means wrong path passed to `revalidatePath`. Add `console.log(urlWithLocale)` to verify.
-4. **Cached downstream** — if you deploy behind a CDN (Cloudflare, Vercel Edge), the CDN may be caching the HTML separately from Next.js. Add a `Cache-Control: no-cache` on the page response or configure CDN to respect Next.js cache tags.
-5. **Middleware matcher** — confirm `/api/revalidate` is excluded. A misconfigured matcher will rewrite the POST to `/en/api/revalidate` and 404.
-6. **Content not `Published`** — saving-as-draft doesn't trigger a publish webhook. Confirm the editor actually clicked Publish.
+1. **Webhook not reaching the app** — check DXP access logs for `POST /hooks/graph`. If nothing, the CMS webhook config is wrong (URL, secret).
+2. **401 in logs** — `OPTIMIZELY_GRAPH_CALLBACK_APIKEY` mismatch between DXP env and CMS webhook config.
+3. **200 received but content stale** — check the response in DXP logs. If `path` resolved correctly, `revalidatePath` ran but the Redis handler may not be wired (see `references/static-generation.md` "the cache isn't sharing across replicas").
+4. **`revalidateTag` missing `'max'`** — silent no-op. Verify the call uses `revalidateTag(tag, 'max')`.
+5. **CDN cache not purged** — check `OPTIMIZELY_SITE_HOSTNAME`, `OPTIMIZELY_CLOUDPLATFORM_API_URL`, `OPTIMIZELY_CLOUDPLATFORM_API_RESOURCE_ID` are present and the managed identity has `edge-cache` scope.
+6. **Content not actually `Published`** — saving-as-draft doesn't trigger the webhook. Confirm the editor clicked Publish.

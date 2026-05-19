@@ -1,240 +1,289 @@
-# Locale Routing (`proxy.ts` middleware)
+# Locale Routing (`next-intl` + `src/proxy.ts`)
 
-The starter uses a single middleware file at repo root named `proxy.ts` (not `middleware.ts`). It handles every request, negotiates the locale, and rewrites or redirects to a locale-prefixed path.
+This project uses `next-intl` for locale routing — no bespoke Negotiator setup, no custom rewrite logic. The middleware lives at `src/proxy.ts` (Next.js auto-detects the proxy export + config; filename `middleware.ts` would also work).
 
-## Why `proxy.ts` not `middleware.ts`
-
-Next.js supports both — `middleware.ts` is the default convention; `proxy.ts` is valid when the middleware is configured to load from that path. The starter uses `proxy.ts` because of its separation-of-concerns convention. Do not rename without updating `next.config.ts` and all imports. The file exports:
-
-- `export async function proxy(request)` — named export
-- `export const config = { matcher: [...] }`
-
-That pairing is what Next.js looks for, regardless of the filename.
-
-## Locale priority
+## The three i18n files
 
 ```
-1. Locale in URL path       (e.g. /pl/about)           — user intent, strongest signal
-2. Cookie  __LOCALE_NAME    (previously-chosen locale) — durable preference
-3. Accept-Language header   (parsed by Negotiator)      — browser preference
-4. DEFAULT_LOCALE           ('en')                      — fallback
+src/i18n/
+  routing.ts        — defineRouting({ locales, defaultLocale, localePrefix })
+  request.ts        — getRequestConfig wraps async config + messages import
+  navigation.ts     — createNavigation(routing) — locale-aware Link, redirect, etc.
 ```
 
-The principle: **user intent beats browser preference**. A link to `/pl/about` shared with a Swedish-speaking user should display Polish content, not silently flip to Swedish just because `Accept-Language` says so. The URL path wins unconditionally.
-
-Default locale uses **rewrite** (URL stays `/about`, server sees `/en/about`). Non-default uses **redirect** (URL changes to `/pl/about`). Rationale: canonical URLs for the default language should be clean; non-default needs an explicit marker so users can share links.
-
-### Silent fallback on missing translations
-
-Optimizely Graph serves content in a fallback locale (usually the CMS instance's default) when the requested locale has no translated version. This happens **silently** — no error, no log, no visible marker. A Swedish visitor requesting a page only translated into English will see the English version at `/sv/page-name`.
-
-This is usually desirable (better than a 404), but it's easy to miss during QA. Verify translation coverage manually or add a runtime check (`content._metadata.locale !== requestedLocale`) to log fallbacks.
-
-## Full file
+### `routing.ts`
 
 ```ts
-// proxy.ts
-import { DEFAULT_LOCALE, LOCALES } from '@/lib/optimizely/language'
-import { createUrl, leadingSlashUrlPath } from '@/lib/utils'
-import type { NextRequest } from 'next/server'
-import { NextResponse } from 'next/server'
-import Negotiator from 'negotiator'
+// src/i18n/routing.ts
+import { defineRouting } from 'next-intl/routing';
 
-const COOKIE_NAME_LOCALE = '__LOCALE_NAME'
-const HEADER_KEY_LOCALE  = 'X-Locale'
+export const routing = defineRouting({
+  locales: ['en', 'no', 'sv', 'da'] as const,
+  defaultLocale: 'no',
+  localePrefix: 'always',
+});
 
-function shouldExclude(path: string) {
-  return (
-    path.startsWith('/static') ||
-    path.includes('/api/') ||
-    path.includes('.') ||          // skip files (favicon, images, etc.)
-    path.includes('/json') ||
-    path.includes('/preview')      // preview route bypasses locale negotiation
-  )
-}
+export type Locale = (typeof routing.locales)[number];
+```
 
-function getBrowserLanguage(request: NextRequest, locales: string[]): string | undefined {
-  const headerLanguage = request.headers.get('Accept-Language')
-  if (!headerLanguage) return undefined
+`localePrefix: 'always'` means every URL is locale-prefixed — there's no bare `/about`, it's always `/no/about` or `/en/about`. This is what makes the catch-all `src/app/[locale]/[[...slug]]` straightforward: the locale segment is always present.
 
-  const languages = new Negotiator({
-    headers: { 'accept-language': headerLanguage },
-  }).languages()
+The default locale (`'no'` here) is what the middleware redirects to when no locale matches.
 
-  for (const lang of languages) {
-    if (locales.includes(lang)) return lang                    // exact match
-    const prefix = lang.split('-')[0]                           // strip region
-    if (locales.includes(prefix)) return prefix                 // 'pl-PL' → 'pl'
-  }
-  return undefined
-}
+### `request.ts`
 
-function getLocale(request: NextRequest, locales: string[]): string {
-  const cookieLocale = request.cookies.get(COOKIE_NAME_LOCALE)?.value
-  if (cookieLocale && locales.includes(cookieLocale)) return cookieLocale
+```ts
+// src/i18n/request.ts
+import { hasLocale } from 'next-intl';
+import { getRequestConfig } from 'next-intl/server';
+import { routing } from './routing';
 
-  const browserLang = getBrowserLanguage(request, locales)
-  if (browserLang && locales.includes(browserLang)) return browserLang
+export default getRequestConfig(async ({ requestLocale }) => {
+  const requested = await requestLocale;
+  const locale = hasLocale(routing.locales, requested) ? requested : routing.defaultLocale;
 
-  return DEFAULT_LOCALE
-}
+  return {
+    locale,
+    messages: (await import(`../../messages/${locale}.json`)).default,
+  };
+});
+```
 
-function updateLocaleCookies(
-  request: NextRequest, response: NextResponse, locale?: string,
-): void {
-  const cookieLocale = request.cookies.get(COOKIE_NAME_LOCALE)?.value
-  const newLocale = locale || null
+This is what `createNextIntlPlugin('./src/i18n/request.ts')` wires into the build. The dynamic import of the JSON file is what `next-intl` watches for translation file changes during dev.
 
-  if (newLocale !== cookieLocale) {
-    if (newLocale) response.cookies.set(COOKIE_NAME_LOCALE, newLocale)
-    else           response.cookies.delete(COOKIE_NAME_LOCALE)
-  }
+### `navigation.ts`
 
-  if (newLocale) response.headers.append(HEADER_KEY_LOCALE, newLocale)
-  else           response.headers.delete(HEADER_KEY_LOCALE)
-}
+```ts
+// src/i18n/navigation.ts
+import { createNavigation } from 'next-intl/navigation';
+import { routing } from './routing';
 
-export async function proxy(request: NextRequest) {
-  const pathname = request.nextUrl.pathname
-  let response = NextResponse.next()
+export const { Link, redirect, usePathname, useRouter, getPathname } =
+  createNavigation(routing);
+```
 
-  if (shouldExclude(pathname)) return response
+Always use these instead of importing from `next/link` or `next/navigation`:
+- `Link` auto-prefixes the current locale (or the explicit `locale` prop)
+- `usePathname` strips the locale prefix
+- `redirect` accepts both paths with and without locale
 
-  // Case 1: URL already contains a known locale → rewrite to normalized form
-  const localeInPathname = LOCALES.find(
-    (l) => pathname.startsWith(`/${l}/`) || pathname === `/${l}`,
-  )
-  if (localeInPathname) {
-    const pathnameWithoutLocale = pathname.replace(`/${localeInPathname}`, '')
-    const newUrl = createUrl(
-      `/${localeInPathname}${leadingSlashUrlPath(pathnameWithoutLocale)}`,
-      request.nextUrl.searchParams,
-    )
-    response = NextResponse.rewrite(new URL(newUrl, request.url))
-    updateLocaleCookies(request, response, localeInPathname)
-    return response
-  }
+```tsx
+import { Link } from '@/i18n/navigation';
 
-  // Case 2: No locale in URL → negotiate and either rewrite (default) or redirect (non-default)
-  const locale = getLocale(request, LOCALES)
-  const newUrl = createUrl(
-    `/${locale}${leadingSlashUrlPath(pathname)}`,
-    request.nextUrl.searchParams,
-  )
-  response =
-    locale === DEFAULT_LOCALE
-      ? NextResponse.rewrite(new URL(newUrl, request.url))
-      : NextResponse.redirect(new URL(newUrl, request.url))
+<Link href="/about">About</Link>                       // → /no/about (or current locale)
+<Link href="/about" locale="en">English</Link>         // → /en/about
+```
 
-  updateLocaleCookies(request, response, locale)
-  return response
-}
+## The middleware
+
+```ts
+// src/proxy.ts
+import createMiddleware from 'next-intl/middleware';
+import { routing } from './i18n/routing';
+
+export default createMiddleware(routing);
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    '/((?!api|hooks|debug|diagnostics|preview|_next|_vercel|.*\\..*).*)',
+  ],
+};
+```
+
+That's the whole file. `createMiddleware(routing)` does everything: locale negotiation from `Accept-Language`, redirect to the prefixed URL, cookie persistence of the chosen locale.
+
+### What the matcher excludes
+
+- `api` — Next.js API routes
+- `hooks` — the `/hooks/graph` webhook receiver
+- `debug`, `diagnostics` — dev-only inspection routes (excluded from middleware AND robots)
+- `preview` — the CMS preview iframe; locale negotiation would break the editor's communication
+- `_next`, `_vercel` — Next.js / Vercel internals
+- `.*\\..*` — any path with a file extension (skips images, JSON, etc.)
+
+Forgetting one of these is a silent failure source:
+- Forgetting `hooks` → webhook URLs get locale-prefixed → CMS sees 404, retries until quota burnt
+- Forgetting `preview` → CMS iframe sees a redirect → editor screen blanks
+- Forgetting `api` → API routes redirect → callers see 308
+
+## Why filename `proxy.ts` and not `middleware.ts`
+
+Next.js supports both — `middleware.ts` is the documented convention; `proxy.ts` works when the file exports a default function and a named `config`. The repo uses `proxy.ts` for separation-of-concerns convention. Either works; the choice is cosmetic.
+
+If renaming, just rename the file. No `next.config.ts` changes needed — Next.js scans for either filename.
+
+## Locale layout
+
+```tsx
+// src/app/[locale]/layout.tsx
+import { notFound } from 'next/navigation';
+import { hasLocale, NextIntlClientProvider } from 'next-intl';
+import { setRequestLocale } from 'next-intl/server';
+import { Header, Footer } from '@/components/layout';
+import { routing } from '@/i18n/routing';
+
+type Props = {
+  children: React.ReactNode;
+  params: Promise<{ locale: string }>;
+};
+
+export function generateStaticParams() {
+  return routing.locales.map((locale) => ({ locale }));
+}
+
+export default async function LocaleLayout({ children, params }: Props) {
+  const { locale } = await params;
+  if (!hasLocale(routing.locales, locale)) notFound();
+  setRequestLocale(locale);
+
+  return (
+    <NextIntlClientProvider>
+      <Header />
+      <main id="main-content" className="flex-1">{children}</main>
+      <Footer />
+    </NextIntlClientProvider>
+  );
 }
 ```
 
-## What the matcher excludes
+Three things happen here:
+1. **`hasLocale` guard** — rejects unknown locale segments (e.g. someone visiting `/fr/about` when `fr` isn't in `routing.locales`). `notFound()` commits 404.
+2. **`setRequestLocale`** — tells `next-intl` what locale this server render is for. Required for static rendering; without it, `next-intl` falls back to dynamic.
+3. **`<NextIntlClientProvider>`** — makes the active locale + messages available to client components. Server components use `useTranslations()` or `getTranslations()` directly.
 
-- `api/*` — API routes (including `/api/revalidate`)
-- `_next/static/*` — bundled JS/CSS
-- `_next/image` — Next.js image optimization endpoint
-- `favicon.ico`
+## Reading the locale
 
-Plus the `shouldExclude()` checks further narrow excluded paths at function-level: anything with a `.`, `/static`, `/api/`, `/json`, or `/preview`. The redundancy is intentional — the matcher excludes at the edge; `shouldExclude` is the authoritative check.
+In server components / actions:
+```ts
+import { getLocale, getTranslations } from 'next-intl/server';
 
-## Cookie vs Accept-Language precedence
+const locale = await getLocale();
+const t = await getTranslations('Header');
+```
 
-Cookie wins over Accept-Language, so once a user has clicked the language-switcher their choice persists across sessions. The cookie is set on every matched request (see `updateLocaleCookies`) so even implicit locale detections via Accept-Language get written back as a preference.
+In client components:
+```ts
+'use client';
+import { useLocale, useTranslations } from 'next-intl';
 
-## Language switcher (client component)
+const locale = useLocale();
+const t = useTranslations('Header');
+```
+
+In the SDK preview route, `useLocale`/`getLocale` is unavailable until the `NextIntlClientProvider` wraps things — that's why the preview route bridges the CMS `loc` searchParam into `setRequestLocale` manually before rendering anything else.
+
+## Messages files
+
+```
+messages/
+  en.json
+  no.json
+  sv.json
+  da.json
+```
+
+JSON shape is namespaced — `useTranslations('Header')` resolves to the `Header` key:
+
+```json
+{
+  "Header": {
+    "nav": {
+      "services": { "label": "Services", "href": "/services" }
+    }
+  }
+}
+```
+
+Adding a new translation key requires updating every locale file. There's no automated check; missing keys log a warning at render time but don't fail the build.
+
+## Adding a new locale
+
+1. **Extend `routing.locales`** in `src/i18n/routing.ts`:
+   ```ts
+   locales: ['en', 'no', 'sv', 'da', 'fi'] as const,
+   ```
+2. **Add `messages/fi.json`** — copy from an existing locale and translate.
+3. **Add the language in CMS Settings → Languages** so editors can author content in it.
+4. **Translate content for every CMS page** you want available in the new locale.
+
+No middleware changes needed — `createMiddleware(routing)` reads the locales list at call time.
+
+## The preview route locale bridge
+
+`/preview` is excluded from the middleware (CMS sends its own `loc` searchParam). The preview page bridges that into `next-intl` manually:
 
 ```tsx
-// components/layout/language-switcher.tsx  (abbreviated)
-'use client'
-import { useRouter, usePathname } from 'next/navigation'
-import { LOCALES } from '@/lib/optimizely/language'
+async function PreviewBody({ searchParams }: Props) {
+  const params = await searchParams;
+  const locParam = typeof params.loc === 'string' ? params.loc : undefined;
+  const locale = hasLocale(routing.locales, locParam) ? locParam : routing.defaultLocale;
+  setRequestLocale(locale);
+  const messages = (await import(`../../../messages/${locale}.json`)).default;
 
-const LOCALE_NAMES = { en: 'English', pl: 'Polski', sv: 'Svenska' } as const
+  // ... rest of preview render ...
+  return (
+    <NextIntlClientProvider locale={locale} messages={messages}>
+      {/* ... */}
+    </NextIntlClientProvider>
+  );
+}
+```
 
-export function LanguageSwitcher({ currentLocale }: { currentLocale: string }) {
-  const router = useRouter()
-  const pathname = usePathname()
+The explicit `locale` and `messages` props on `<NextIntlClientProvider>` (rather than the auto-config form used in the locale layout) are necessary because the preview route lives outside `[locale]` — there's no `getRequestConfig` flow to consume.
+
+## hreflang alternates — known TODO
+
+The page-level `generateMetadata` in `[[...slug]]/page.tsx` intentionally omits `alternates.languages` for now:
+
+```ts
+// TODO (Phase 6c): surface alternate URLs from the CMS payload and emit
+// `alternates.languages`. Localized slugs differ per locale (e.g. /no/om-oss
+// vs /en/about) and the CMS owns the mapping.
+```
+
+The Graph payload exposes the current locale's URL but not its sibling-locale counterparts. Emitting `alternates.languages` correctly requires either:
+- A follow-up Graph query keyed by content id, fetching every locale's URL, OR
+- An explicit per-content "Alternate URLs" property in the CMS schema
+
+Skip until one of those is in place; emitting wrong alternates is worse than emitting none.
+
+## Locale switcher (client component)
+
+```tsx
+// src/components/layout/LocaleSwitcher.tsx (abbreviated)
+'use client';
+import { useLocale } from 'next-intl';
+import { useRouter, usePathname } from '@/i18n/navigation';
+import { routing } from '@/i18n/routing';
+
+export default function LocaleSwitcher() {
+  const currentLocale = useLocale();
+  const router = useRouter();
+  const pathname = usePathname();
 
   function switchTo(next: string) {
-    // Replace leading /<old>/ with /<new>/
-    const stripped = pathname.replace(new RegExp(`^/${currentLocale}(/|$)`), '/')
-    const target = next === currentLocale ? pathname : `/${next}${stripped}`
-    router.push(target)
-    router.refresh()
+    router.replace(pathname, { locale: next });
   }
 
   return (
     <select value={currentLocale} onChange={(e) => switchTo(e.target.value)}>
-      {LOCALES.map((l) => <option key={l} value={l}>{LOCALE_NAMES[l]}</option>)}
+      {routing.locales.map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}
     </select>
-  )
+  );
 }
 ```
 
-The switcher does a `router.push` to the locale-prefixed URL. The middleware will then:
-- If `next` is the default locale → rewrite to the internal `/en/...` form (URL stays clean? No — because `router.push(target)` directly uses `target` which already has the prefix; the middleware's "non-default" redirect logic doesn't apply because the URL already starts with a known locale).
-- Either way, the `__LOCALE_NAME` cookie gets updated so future bare URLs render in the new locale.
-
-## hreflang — `generateAlternates`
-
-Every page's `generateMetadata()` returns `alternates` so crawlers understand multi-lingual equivalents.
-
-```ts
-// lib/metadata.ts
-import { LOCALES } from '@/lib/optimizely/language'
-import { AlternateURLs } from 'next/dist/lib/metadata/types/alternative-urls-types'
-
-export function normalizePath(path: string): string {
-  path = path.toLowerCase()
-  if (path === '/')        return ''
-  if (path.endsWith('/'))  path = path.slice(0, -1)
-  if (path.startsWith('/')) path = path.slice(1)
-  return path
-}
-
-export function generateAlternates(locale: string, path: string): AlternateURLs {
-  path = normalizePath(path)
-  return {
-    canonical: `/${locale}/${path}`,
-    languages: Object.assign(
-      {},
-      ...LOCALES.map((l) => ({ [l]: `/${l}/${path}` })),
-    ),
-  }
-}
-```
-
-Usage:
-```ts
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { locale, slug } = await params
-  return {
-    ...
-    alternates: generateAlternates(locale, `/${slug.join('/')}/`),
-  }
-}
-```
-
-Produces `<link rel="alternate" hreflang="en" href="/en/about">` etc. alongside the canonical.
-
-## Adding a new locale
-
-1. Add to `LOCALES` in `lib/optimizely/language.ts`.
-2. Add its display name in `components/layout/language-switcher.tsx`'s `LOCALE_NAMES` map.
-3. In Optimizely CMS: Settings → Languages → add the new language.
-4. Publish content in that language for every CMS page you want available.
-
-No middleware changes needed — `Negotiator` picks up whatever's in `LOCALES`, and `generateStaticParams` in the locale layout uses `LOCALES` directly.
+`useRouter` from `@/i18n/navigation` (not `next/navigation`) — it accepts the `locale` option and constructs the prefixed URL correctly.
 
 ## Debugging middleware
 
-- Add `console.log` liberally in `proxy.ts` — logs land in the dev server output (not the browser).
-- The `X-Locale` response header (written by `updateLocaleCookies`) is a cheap verification that middleware ran and chose the right locale.
-- If `/api/revalidate` behaves strangely, confirm the matcher actually excludes it — a misconfigured matcher that routes API requests through the middleware will rewrite them to `/en/api/...` and they'll 404.
+- Add `console.log` to the relevant code path. `createMiddleware` is opaque; if you need to inspect what it does, the dev server logs requests through the middleware.
+- Confirm the `matcher` excludes the path you're investigating. A misconfigured matcher that routes API/webhook traffic through middleware will rewrite POST bodies and cause 308 redirects.
+- The `x-pathname` and `x-next-intl-locale` response headers (when present) confirm middleware ran.
+
+## Anti-patterns
+
+- **Importing `Link` from `next/link`** in app code — bypasses locale prefixing. Always use `@/i18n/navigation`.
+- **Hardcoding locale strings in URLs** — `<Link href="/no/about">` works but breaks for non-default locales. Use relative paths like `<Link href="/about">` and let next-intl prefix.
+- **Reading `useLocale()` outside `<NextIntlClientProvider>`** — throws. Either wrap or use `getLocale()` in a server component.
+- **Forgetting `setRequestLocale(locale)` in the locale layout** — falls back to dynamic rendering, defeats `cacheComponents`.
