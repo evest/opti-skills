@@ -176,6 +176,32 @@ export default function LandingPage({ content }: Props) {
 }
 ```
 
+### Experience-level display settings
+
+A **top-level experience does not receive a `displaySettings` prop.** The catch-all route renders it as `<OptimizelyComponent content={content} />` with no second argument, and `OptimizelyComponent` only forwards a `displaySettings` value that *it* was handed — it never parses the experience's own. (The `/preview` route is the same.) Only **nested** composition nodes get parsed settings, because `OptimizelyComposition` / `OptimizelyGridSection` parse each child node's `displaySettings` before rendering it.
+
+So a `displaySettings` prop on any experience component — including the built-in `BlankExperience` — is always `undefined`.
+
+The experience's own display-template settings live on the **root composition node** as a raw `{ key, value }[]` array. Parse them in the component:
+
+```tsx
+import { ContentProps, DisplayTemplates } from '@optimizely/cms-sdk';
+
+export default function LandingPage({ content, displaySettings }: Props) {
+  // Top-level experiences get no displaySettings prop — read the experience's
+  // own settings off the root composition node and parse them.
+  const settings = (displaySettings ??
+    DisplayTemplates.parseDisplaySettings(content.composition?.displaySettings)) as
+    | ContentProps<typeof LandingPageDisplayTemplate>
+    | undefined;
+
+  const colorScheme = settings?.colorScheme ?? 'default';
+  // ...
+}
+```
+
+`DisplayTemplates.parseDisplaySettings` (exported from `@optimizely/cms-sdk`) turns the `{ key, value }[]` array into a keyed object and coerces `'true'`/`'false'` strings to booleans. Symptom when missed: experience-level display-template settings silently do nothing — the component always sees defaults.
+
 ### Section Component (BlankSection)
 
 Sections are full-width containers that hold rows and columns:

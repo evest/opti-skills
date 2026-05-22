@@ -239,6 +239,32 @@ export default function ProfileBlock({
 
 Register the template via `initDisplayTemplateRegistry([ProfileBlockDisplayTemplate])` in `src/optimizely.ts`. See the content-types skill for template definition syntax and component-variant registration patterns (`{ default, tags }` vs `'Key:Tag'`).
 
+### Top-level experiences get no `displaySettings` prop
+
+The "second prop" above only reaches **nested** composition nodes. `OptimizelyComposition` and `OptimizelyGridSection` parse each child node's raw `displaySettings` and hand the result to `OptimizelyComponent`. But a **top-level experience** is rendered by the catch-all (and `/preview`) route as `<OptimizelyComponent content={content} />` with no `displaySettings` argument — and `OptimizelyComponent` only forwards what it was given. It never parses the experience's own settings.
+
+So an experience component's `displaySettings` prop is **always `undefined`** — including `BlankExperience` and any `_experience` type that has a display template. The experience examples above destructure only `{ content }` for this reason.
+
+The experience's own settings live on the **root composition node** as a raw `{ key, value }[]` array. Read and parse them inside the component:
+
+```tsx
+import { ContentProps, DisplayTemplates } from '@optimizely/cms-sdk';
+
+export default function LandingPageExperience({ content, displaySettings }: Props) {
+  // Top-level experiences receive no displaySettings prop — parse the
+  // experience's own settings off the root composition node.
+  const settings = (displaySettings ??
+    DisplayTemplates.parseDisplaySettings(content.composition?.displaySettings)) as
+    | ContentProps<typeof LandingPageExperienceDisplayTemplate>
+    | undefined;
+
+  const surface = settings?.surface ?? 'light';
+  // ...
+}
+```
+
+`DisplayTemplates.parseDisplaySettings` (exported from `@optimizely/cms-sdk`) converts the `{ key, value }[]` array into a keyed object and coerces `'true'`/`'false'` strings to booleans. Symptom when missed: experience-level display-template settings (background, header style, theme toggles, …) silently do nothing.
+
 ## Debugging Visual Builder rendering
 
 | Symptom | Cause |
@@ -248,7 +274,8 @@ Register the template via `initDisplayTemplateRegistry([ProfileBlockDisplayTempl
 | "Component not found" in render | Content type referenced by the composition isn't in `initReactComponentRegistry.resolver` |
 | Layout styles applied twice / conflicting | Probably wrapped `<BlankExperience>` AND a section inside another layout container — Visual Builder already handles nesting |
 | Images load in published but not in preview | Missing `src()` wrapping — use `getPreviewUtils(content).src(content.image)` not `content.image.url.default` |
-| `displaySettings` is `undefined` in component | Either no display template registered for the type, or the editor hasn't picked one (defaults to undefined) |
+| `displaySettings` prop `undefined` in an **experience** component | Expected — top-level experiences are never passed it. Parse `content.composition.displaySettings` yourself (see "Top-level experiences get no `displaySettings` prop") |
+| `displaySettings` `undefined` in a **block/section** component | No display template registered for the type, or the editor hasn't picked one (defaults to undefined) |
 | Section content renders empty in preview | `BlankSectionContentType` not in `initContentTypeRegistry` — SDK can't resolve the section type |
 
 ## Where this pattern lives in the SDK
