@@ -79,8 +79,8 @@ export const ButtonElementCT = contentType({
   baseType: '_component',
   compositionBehaviors: ['elementEnabled'],
   properties: {
-    text: { type: 'string', displayName: 'Button Text', required: true },
-    link: { type: 'link', displayName: 'Link', required: true },
+    text: { type: 'string', displayName: 'Button Text', isRequired: true },
+    link: { type: 'link', displayName: 'Link', isRequired: true },
   },
 });
 ```
@@ -148,7 +148,7 @@ For the full property type reference with all options and examples, see `referen
 | Type | Use For | Key Options |
 |------|---------|-------------|
 | `string` | Titles, names, short text | `minLength`, `maxLength`, `pattern`, `enum` |
-| `richText` | Formatted content (Slate.js) | `localized` |
+| `richText` | Formatted content (Slate.js) | `isLocalized` |
 | `url` | Simple web address (InferredUrl at runtime) | — |
 | `link` | Rich link with text, title, target | — |
 | `boolean` | True/false checkboxes | — |
@@ -222,8 +222,8 @@ All property types support these common options:
 {
   displayName: 'Field Label',      // Shown in CMS UI
   description: 'Help text',        // Tooltip
-  required: true,                  // Must have value
-  localized: true,                 // Different per language
+  isRequired: true,                  // Must have value
+  isLocalized: true,                 // Different per language
   group: 'content',                // Property group
   sortOrder: 10,                   // Display order
   indexingType: 'searchable',      // Search configuration
@@ -428,8 +428,8 @@ export const ButtonElementCT = contentType({
   baseType: '_component',
   compositionBehaviors: ['elementEnabled'],
   properties: {
-    text: { type: 'string', displayName: 'Button Text', required: true },
-    link: { type: 'link', displayName: 'Link', required: true },
+    text: { type: 'string', displayName: 'Button Text', isRequired: true },
+    link: { type: 'link', displayName: 'Link', isRequired: true },
   },
 });
 

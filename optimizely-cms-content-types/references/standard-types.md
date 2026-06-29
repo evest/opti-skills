@@ -17,14 +17,14 @@ export const HomePageCT = contentType({
     heading: { 
       type: 'string', 
       displayName: 'Page Heading',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
       indexingType: 'searchable',
     },
     subheading: { 
       type: 'string', 
       displayName: 'Subheading',
-      localized: true,
+      isLocalized: true,
     },
     heroImage: { 
       type: 'contentReference', 
@@ -34,7 +34,7 @@ export const HomePageCT = contentType({
     mainContent: { 
       type: 'richText', 
       displayName: 'Main Content',
-      localized: true,
+      isLocalized: true,
     },
     featuredSections: {
       type: 'array',
@@ -59,8 +59,8 @@ export const ArticlePageCT = contentType({
     heading: { 
       type: 'string', 
       displayName: 'Article Title',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
       maxLength: 200,
       indexingType: 'searchable',
     },
@@ -71,7 +71,7 @@ export const ArticlePageCT = contentType({
     publishDate: { 
       type: 'dateTime', 
       displayName: 'Publish Date',
-      required: true,
+      isRequired: true,
       indexingType: 'queryable',
     },
     featuredImage: { 
@@ -82,14 +82,14 @@ export const ArticlePageCT = contentType({
     summary: { 
       type: 'string', 
       displayName: 'Article Summary',
-      localized: true,
+      isLocalized: true,
       maxLength: 500,
     },
     body: { 
       type: 'richText', 
       displayName: 'Article Content',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     tags: {
       type: 'array',
@@ -123,18 +123,18 @@ export const BlogPageCT = contentType({
     title: { 
       type: 'string', 
       displayName: 'Blog Title',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     author: { 
       type: 'string', 
       displayName: 'Author',
-      required: true,
+      isRequired: true,
     },
     publishDate: { 
       type: 'dateTime', 
       displayName: 'Publish Date',
-      required: true,
+      isRequired: true,
     },
     category: { 
       type: 'string', 
@@ -154,14 +154,14 @@ export const BlogPageCT = contentType({
     excerpt: { 
       type: 'string', 
       displayName: 'Excerpt',
-      localized: true,
+      isLocalized: true,
       maxLength: 300,
     },
     content: { 
       type: 'richText', 
       displayName: 'Blog Content',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     allowComments: { 
       type: 'boolean', 
@@ -189,13 +189,13 @@ export const LandingPageCT = contentType({
     heading: { 
       type: 'string', 
       displayName: 'Page Heading',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     subheading: { 
       type: 'string', 
       displayName: 'Subheading',
-      localized: true,
+      isLocalized: true,
     },
     heroSection: { 
       type: 'content', 
@@ -241,13 +241,13 @@ export const HeroBlockCT = contentType({
     title: {
       type: 'string',
       displayName: 'Title',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     subtitle: {
       type: 'string',
       displayName: 'Subtitle',
-      localized: true,
+      isLocalized: true,
     },
     backgroundImage: {
       type: 'contentReference',
@@ -280,23 +280,23 @@ export const CallToActionBlockCT = contentType({
     heading: {
       type: 'string',
       displayName: 'Heading',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     description: {
       type: 'richText',
       displayName: 'Description',
-      localized: true,
+      isLocalized: true,
     },
     primaryButtonText: {
       type: 'string',
       displayName: 'Primary Button Text',
-      required: true,
+      isRequired: true,
     },
     primaryButtonLink: {
       type: 'link',  // Rich link with text/title/target
       displayName: 'Primary Button Link',
-      required: true,
+      isRequired: true,
     },
     secondaryButtonText: {
       type: 'string',
@@ -324,8 +324,8 @@ export const CardBlockCT = contentType({
     heading: { 
       type: 'string', 
       displayName: 'Card Heading',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     image: { 
       type: 'contentReference', 
@@ -335,7 +335,7 @@ export const CardBlockCT = contentType({
     description: { 
       type: 'richText', 
       displayName: 'Card Description',
-      localized: true,
+      isLocalized: true,
     },
     linkText: { 
       type: 'string', 
@@ -369,8 +369,8 @@ export const TitleElementCT = contentType({
     text: {
       type: 'string',
       displayName: 'Title Text',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     level: {
       type: 'string',
@@ -402,19 +402,19 @@ export const ImageElementCT = contentType({
     image: { 
       type: 'contentReference', 
       displayName: 'Image',
-      required: true,
+      isRequired: true,
       allowedTypes: ['_image'],
     },
     altText: { 
       type: 'string', 
       displayName: 'Alt Text',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     caption: { 
       type: 'string', 
       displayName: 'Caption',
-      localized: true,
+      isLocalized: true,
     },
     link: { 
       type: 'url',  // Simple URL
@@ -441,13 +441,13 @@ export const ButtonElementCT = contentType({
     text: {
       type: 'string',
       displayName: 'Button Text',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
     },
     link: {
       type: 'link',  // Rich link with text/title/target
       displayName: 'Button Link',
-      required: true,
+      isRequired: true,
     },
   },
 });
@@ -521,7 +521,7 @@ export const AboutExperienceCT = contentType({
     title: {
       type: 'string',
       displayName: 'Title',
-      required: true,
+      isRequired: true,
     },
     subtitle: {
       type: 'string',
@@ -558,7 +558,7 @@ export const CardBlockCT = contentType({
   baseType: '_component',
   compositionBehaviors: ['sectionEnabled'],
   properties: {
-    title: { type: 'string', displayName: 'Title', required: true },
+    title: { type: 'string', displayName: 'Title', isRequired: true },
     description: { type: 'string', displayName: 'Description' },
     image: { type: 'contentReference', displayName: 'Image', allowedTypes: ['_image'] },
   },
@@ -607,7 +607,7 @@ export const HeroBlockCT = contentType({
   baseType: '_component',
   compositionBehaviors: ['sectionEnabled'],
   properties: {
-    title: { type: 'string', displayName: 'Title', required: true },
+    title: { type: 'string', displayName: 'Title', isRequired: true },
     subtitle: { type: 'string', displayName: 'Subtitle' },
     backgroundImage: { type: 'contentReference', displayName: 'Background', allowedTypes: ['_image'] },
   },

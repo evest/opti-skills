@@ -10,8 +10,8 @@ All property types support these common options:
 {
   displayName?: string;      // Friendly name shown in CMS
   description?: string;      // Tooltip help text
-  required?: boolean;        // Must have a value
-  localized?: boolean;       // Different value per locale/language
+  isRequired?: boolean;        // Must have a value
+  isLocalized?: boolean;       // Different value per locale/language
   group?: string;            // Property group key
   sortOrder?: number;        // Display order (lower numbers first)
   indexingType?: 'searchable' | 'queryable' | 'disabled';  // Default: 'searchable'
@@ -28,8 +28,8 @@ title: {
   type: 'string',
   displayName: 'Title',
   description: 'Help text for editors',
-  required: false,
-  localized: false,
+  isRequired: false,
+  isLocalized: false,
   minLength: 0,
   maxLength: 255,
   pattern: '',  // Regular expression
@@ -57,8 +57,8 @@ body: {
   type: 'richText',
   displayName: 'Article Body',
   description: 'Full rich text editing',
-  required: false,
-  localized: true,
+  isRequired: false,
+  isLocalized: true,
 }
 ```
 
@@ -73,7 +73,7 @@ websiteUrl: {
   type: 'url',
   displayName: 'Website URL',
   description: 'External website link',
-  required: false,
+  isRequired: false,
 }
 ```
 
@@ -88,7 +88,7 @@ ctaLink: {
   type: 'link',
   displayName: 'Call to Action Link',
   description: 'Link with title and target options',
-  required: false,
+  isRequired: false,
 }
 ```
 
@@ -172,7 +172,7 @@ Date and time values with optional constraints.
 publishDate: {
   type: 'dateTime',
   displayName: 'Publish Date',
-  required: true,
+  isRequired: true,
 }
 
 eventStartTime: {
@@ -480,8 +480,8 @@ export const ArticlePageCT = contentType({
       type: 'string',
       displayName: 'Article Title',
       description: 'The main title',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
       group: 'content',
       sortOrder: 10,
       minLength: 10,
@@ -492,8 +492,8 @@ export const ArticlePageCT = contentType({
     body: {
       type: 'richText',
       displayName: 'Article Body',
-      required: true,
-      localized: true,
+      isRequired: true,
+      isLocalized: true,
       group: 'content',
       sortOrder: 20,
     },
@@ -543,7 +543,7 @@ export const ArticlePageCT = contentType({
     publishDate: {
       type: 'dateTime',
       displayName: 'Publish Date',
-      required: true,
+      isRequired: true,
       group: 'scheduling',
       sortOrder: 80,
       indexingType: 'queryable',

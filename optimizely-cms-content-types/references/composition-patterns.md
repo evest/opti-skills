@@ -105,8 +105,8 @@ export const AccordionItemCT = contentType({
   key: 'AccordionItem',
   baseType: '_component',
   properties: {
-    heading: { type: 'string', required: true },
-    content: { type: 'richText', required: true },
+    heading: { type: 'string', isRequired: true },
+    content: { type: 'richText', isRequired: true },
   },
 });
 ```
